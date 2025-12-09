@@ -3,16 +3,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Navigation from "@/components/Navigation";
-import { User, Settings, Bell, Shield, Heart, LogOut, ChevronRight, ArrowLeft, FileText, Clock, Mic, Video, MessageCircle } from "lucide-react";
+import { User, Settings, Bell, Shield, Heart, LogOut, ChevronRight, ArrowLeft, FileText, Video } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import HealthReports from "@/components/HealthReports";
-import Reminders from "@/components/Reminders";
 import PHCDirectory from "@/components/PHCDirectory";
-import VoiceAssistant from "@/components/VoiceAssistant";
 import { EditProfileForm } from "@/components/EditProfileForm";
 import EnhancedProfile from "@/components/EnhancedProfile";
 import VideoLibrary from "@/components/VideoLibrary";
@@ -207,30 +205,22 @@ const Profile = () => {
         className="px-4 sm:px-6"
       >
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-3 lg:grid-cols-6 gap-1 h-auto overflow-x-auto">
-            <TabsTrigger value="profile" className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm py-2 px-2 sm:px-4">
-              <User className="h-3 w-3 sm:h-4 sm:w-4 flex-shrink-0" />
+          <TabsList className="grid w-full grid-cols-4 gap-3 h-auto overflow-x-auto">
+            <TabsTrigger value="profile" className="flex flex-col items-center justify-center gap-1 text-xs sm:text-sm py-3 px-2 rounded-xl">
+              <User className="h-3 w-3 sm:h-4 sm:w-4" />
               <span className="hidden xs:inline">Profile</span>
             </TabsTrigger>
-            <TabsTrigger value="edit" className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm py-2 px-2 sm:px-4">
-              <Settings className="h-3 w-3 sm:h-4 sm:w-4 flex-shrink-0" />
+            <TabsTrigger value="edit" className="flex flex-col items-center justify-center gap-1 text-xs sm:text-sm py-3 px-2 rounded-xl">
+              <Settings className="h-3 w-3 sm:h-4 sm:w-4" />
               <span className="hidden xs:inline">Edit</span>
             </TabsTrigger>
-            <TabsTrigger value="library" className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm py-2 px-2 sm:px-4">
-              <Video className="h-3 w-3 sm:h-4 sm:w-4 flex-shrink-0" />
+            <TabsTrigger value="library" className="flex flex-col items-center justify-center gap-1 text-xs sm:text-sm py-3 px-2 rounded-xl">
+              <Video className="h-3 w-3 sm:h-4 sm:w-4" />
               <span className="hidden sm:inline">Videos</span>
             </TabsTrigger>
-            <TabsTrigger value="reports" className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm py-2 px-2 sm:px-4">
-              <FileText className="h-3 w-3 sm:h-4 sm:w-4 flex-shrink-0" />
+            <TabsTrigger value="reports" className="flex flex-col items-center justify-center gap-1 text-xs sm:text-sm py-3 px-2 rounded-xl">
+              <FileText className="h-3 w-3 sm:h-4 sm:w-4" />
               <span className="hidden sm:inline">Reports</span>
-            </TabsTrigger>
-            <TabsTrigger value="reminders" className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm py-2 px-2 sm:px-4">
-              <Clock className="h-3 w-3 sm:h-4 sm:w-4 flex-shrink-0" />
-              <span className="hidden sm:inline">Reminders</span>
-            </TabsTrigger>
-            <TabsTrigger value="assistant" className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm py-2 px-2 sm:px-4">
-              <Mic className="h-3 w-3 sm:h-4 sm:w-4 flex-shrink-0" />
-              <span className="hidden sm:inline">Assistant</span>
             </TabsTrigger>
           </TabsList>
           
@@ -255,13 +245,7 @@ const Profile = () => {
             <HealthReports />
           </TabsContent>
           
-          <TabsContent value="reminders" className="mt-6">
-            <Reminders />
-          </TabsContent>
           
-          <TabsContent value="assistant" className="mt-6">
-            <VoiceAssistant />
-          </TabsContent>
         </Tabs>
       </motion.div>
 

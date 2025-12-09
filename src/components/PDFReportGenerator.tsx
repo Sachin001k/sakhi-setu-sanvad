@@ -244,13 +244,13 @@ const PDFReportGenerator: React.FC<PDFReportGeneratorProps> = ({ userProfile, ai
   return (
     <Card className="bg-white dark:bg-gray-800 border-0 shadow-xl">
       <CardHeader className="pb-4">
-        <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
+        <CardTitle className="flex items-center gap-2 text-lg sm:text-xl text-white">
           <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
           Generate Wellness Report
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="text-sm text-muted-foreground">
+        <div className="text-sm text-white/80">
           Generate a comprehensive PDF report of your wellness journey including your profile, 
           activity statistics, and recent posts and videos.
         </div>
@@ -259,24 +259,24 @@ const PDFReportGenerator: React.FC<PDFReportGeneratorProps> = ({ userProfile, ai
           <div className="flex items-center gap-2 p-3 bg-white dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
             <Activity className="w-4 h-4 text-blue-600 flex-shrink-0" />
             <div className="min-w-0">
-              <div className="text-sm font-medium text-black dark:text-white">Activity Stats</div>
-              <div className="text-xs text-gray-600 dark:text-gray-300">Posts, videos, views</div>
+              <div className="text-sm font-medium text-white">Activity Stats</div>
+              <div className="text-xs text-white/80">Posts, videos, views</div>
             </div>
           </div>
           
           <div className="flex items-center gap-2 p-3 bg-white dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
             <MessageCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
             <div className="min-w-0">
-              <div className="text-sm font-medium text-black dark:text-white">Recent Posts</div>
-              <div className="text-xs text-gray-600 dark:text-gray-300">Community activity</div>
+              <div className="text-sm font-medium text-white">Recent Posts</div>
+              <div className="text-xs text-white/80">Community activity</div>
             </div>
           </div>
           
           <div className="flex items-center gap-2 p-3 bg-white dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
             <Video className="w-4 h-4 text-purple-600 flex-shrink-0" />
             <div className="min-w-0">
-              <div className="text-sm font-medium text-black dark:text-white">Video Content</div>
-              <div className="text-xs text-gray-600 dark:text-gray-300">Published videos</div>
+              <div className="text-sm font-medium text-white">Video Content</div>
+              <div className="text-xs text-white/80">Published videos</div>
             </div>
           </div>
         </div>

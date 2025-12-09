@@ -33,6 +33,7 @@ import {
   Bot,
   Send,
   MessageCircle,
+  Volume2,
   X,
   Archive
 } from 'lucide-react';
@@ -102,7 +103,34 @@ const symptomDetailInputs: Record<string, {
   }
 };
 
+const speechLanguageOverrides: Record<string, string> = {
+  en: 'en-US',
+  hi: 'hi-IN',
+  mr: 'mr-IN',
+  bn: 'bn-IN',
+  gu: 'gu-IN',
+  ta: 'ta-IN',
+  te: 'te-IN',
+  kn: 'kn-IN',
+  ml: 'ml-IN',
+  pa: 'pa-IN',
+  ur: 'ur-IN'
+};
+
+const resolveSpeechLanguageCode = (language?: string) => {
+  if (!language) return 'en-US';
+  const normalized = language.split('-')[0].toLowerCase();
+  if (speechLanguageOverrides[normalized]) {
+    return speechLanguageOverrides[normalized];
+  }
+  if (language.includes('-')) {
+    return language;
+  }
+  return `${normalized}-${normalized === 'en' ? 'US' : 'IN'}`;
+};
+
 export const SymptomTracker: React.FC = () => {
+  const { user } = useAuth();
   const [symptoms, setSymptoms] = useState<any[]>([]);
   const [selectedSymptom, setSelectedSymptom] = useState('');
   const [severity, setSeverity] = useState([5]);
@@ -119,8 +147,11 @@ export const SymptomTracker: React.FC = () => {
     mostCommonSymptom: '',
     recentTrend: 'stable'
   });
-  const { user } = useAuth();
-  
+  const [preferredLanguage, setPreferredLanguage] = useState<string>(() => {
+    return (user?.user_metadata?.preferred_language as string) || 'en';
+  });
+  const [speechSynthesis, setSpeechSynthesis] = useState<SpeechSynthesis | null>(null);
+  const [speechSupported, setSpeechSupported] = useState(false);
   const { 
     isLoading: aiLoading, 
     generateWellnessAdvice, 
@@ -135,6 +166,61 @@ export const SymptomTracker: React.FC = () => {
       fetchSymptoms();
     }
   }, [user]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      setSpeechSynthesis(window.speechSynthesis);
+      setSpeechSupported(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const loadPreferredLanguage = async () => {
+      try {
+        const { data: userData, error: userError } = await supabase
+          .from('users')
+          .select('preferred_language')
+          .eq('id', user.id)
+          .single();
+
+        if (!userError && userData?.preferred_language) {
+          setPreferredLanguage(userData.preferred_language);
+          return;
+        }
+
+        const { data: profileData, error: profileError } = await supabase
+          .from('user_profiles')
+          .select('preferred_language')
+          .eq('user_id', user.id)
+          .single();
+
+        if (!profileError && profileData?.preferred_language) {
+          setPreferredLanguage(profileData.preferred_language);
+        }
+      } catch (error) {
+        console.error('Error fetching preferred language:', error);
+      }
+    };
+
+    loadPreferredLanguage();
+  }, [user]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = (event: Event) => {
+      const customEvent = event as CustomEvent<{ language?: string }>;
+      if (customEvent.detail?.language) {
+        setPreferredLanguage(customEvent.detail.language);
+      }
+    };
+
+    window.addEventListener('preferredLanguageUpdated', handler as EventListener);
+    return () => {
+      window.removeEventListener('preferredLanguageUpdated', handler as EventListener);
+    };
+  }, []);
 
   const fetchSymptoms = async () => {
     if (!user) return;
@@ -217,6 +303,23 @@ export const SymptomTracker: React.FC = () => {
     });
   };
 
+  const speakSymptomName = (label: string, severityValue?: number) => {
+    if (!speechSynthesis) return;
+    try {
+      speechSynthesis.cancel();
+      const textToSpeak = severityValue
+        ? `${label}. Severity ${severityValue} out of ten.`
+        : label;
+      const utterance = new SpeechSynthesisUtterance(textToSpeak);
+      utterance.lang = resolveSpeechLanguageCode(preferredLanguage);
+      utterance.rate = 0.95;
+      utterance.pitch = 1;
+      speechSynthesis.speak(utterance);
+    } catch (error) {
+      console.error('Speech synthesis error:', error);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !selectedSymptom) return;
@@ -286,6 +389,10 @@ export const SymptomTracker: React.FC = () => {
 
   const handleSymptomSelect = (value: string) => {
     setSelectedSymptom(value);
+    const symptomLabel = symptomTypes.find(s => s.value === value)?.label;
+    if (symptomLabel) {
+      speakSymptomName(symptomLabel);
+    }
   };
 
   const currentDetailConfig = selectedSymptom ? symptomDetailInputs[selectedSymptom] : undefined;
@@ -931,6 +1038,7 @@ IMPORTANT: Provide recommendations based ONLY on the symptoms and their severity
                     const symptomType = symptomTypes.find(s => s.value === symptom.symptom_type);
                     const Icon = symptomType?.icon || Activity;
                     const color = symptomType?.color || 'text-gray-500';
+                    const displayLabel = symptomType?.label || symptom.symptom_type.replace('_', ' ');
                     
                     return (
                       <motion.div
@@ -945,10 +1053,10 @@ IMPORTANT: Provide recommendations based ONLY on the symptoms and their severity
                           <div className={`p-2 rounded-lg bg-gray-100 flex-shrink-0`}>
                             <Icon className={`w-4 h-4 sm:w-5 sm:h-5 ${color}`} />
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium text-gray-900 text-sm sm:text-base">
-                              {symptomType?.label || symptom.symptom_type.replace('_', ' ')}
-                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-gray-900 text-sm sm:text-base">
+                                {displayLabel}
+                              </div>
                             <div className="text-xs sm:text-sm text-gray-500 flex items-center gap-2">
                               <Clock className="w-3 h-3 flex-shrink-0" />
                               <span className="hidden sm:inline">
@@ -969,22 +1077,32 @@ IMPORTANT: Provide recommendations based ONLY on the symptoms and their severity
                           <Badge className={`px-2 sm:px-3 py-1 text-xs sm:text-sm ${getSeverityColor(symptom.severity)}`}>
                             {symptom.severity}/10
                           </Badge>
-                          <div className="flex items-center gap-2 sm:gap-3">
-                            <div className="text-right">
-                              <div className="text-xs sm:text-sm font-medium text-gray-900">
-                                {getSeverityLabel(symptom.severity)}
+                            <div className="flex items-center gap-2 sm:gap-3">
+                              <div className="text-right">
+                                <div className="text-xs sm:text-sm font-medium text-gray-900">
+                                  {getSeverityLabel(symptom.severity)}
+                                </div>
                               </div>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                disabled={!speechSupported}
+                                onClick={() => speakSymptomName(displayLabel, symptom.severity)}
+                                className="text-gray-400 hover:text-pink-500 hover:bg-pink-50 dark:hover:bg-pink-900/20 transition-colors"
+                                title={`Play ${displayLabel}`}
+                              >
+                                <Volume2 className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteSymptom(symptom.id)}
+                                className="h-8 w-8 p-0 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                title="Clear Entry"
+                              >
+                                <Archive className="w-4 h-4" />
+                              </Button>
                             </div>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDeleteSymptom(symptom.id)}
-                              className="h-8 w-8 p-0 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                              title="Clear Entry"
-                            >
-                              <Archive className="w-4 h-4" />
-                            </Button>
-                          </div>
                         </div>
                       </motion.div>
                     );

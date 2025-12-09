@@ -2,16 +2,16 @@ import { motion } from "framer-motion";
 import Navigation from "@/components/Navigation";
 import { CommunityChat } from "@/components/CommunityChat";
 import VoiceAssistant from "@/components/VoiceAssistant";
-import { MessageCircle, ArrowLeft, Mic } from "lucide-react";
+import { ArrowLeft, MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 const Community = () => {
   const navigate = useNavigate();
   const { user, loading } = useAuth();
+  const [showAssistant, setShowAssistant] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -55,40 +55,54 @@ const Community = () => {
               <MessageCircle className="w-6 h-6 text-secondary" />
             </motion.div>
             <div>
-              <h1 className="text-3xl font-bold">Community</h1>
-              <p className="text-muted-foreground mt-1">Together we are stronger</p>
+              <h1 className="text-3xl font-bold text-black">Community Chat</h1>
+              <p className="text-black/70 mt-1 dark:text-black">Together we are stronger</p>
             </div>
           </div>
         </div>
       </motion.header>
 
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
-              className="px-6"
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+        className="px-6 space-y-8"
+      >
+        <div className="rounded-3xl bg-white/80 dark:bg-gray-900/60 p-6 shadow-2xl">
+          <div className="mb-4">
+            <h2 className="text-2xl font-semibold text-foreground dark:text-white">Community Conversations</h2>
+            <p className="text-black/70 mt-1 dark:text-white/70">
+              Share updates, tips, and encouragement with women across the community.
+            </p>
+          </div>
+          <CommunityChat />
+        </div>
+        <div className="rounded-3xl bg-white/80 dark:bg-gray-900/60 p-6 shadow-2xl">
+          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-2xl font-semibold text-foreground dark:text-white">AI Assistant</h2>
+              <p className="text-black/70 dark:text-white/70 mt-1">
+                Ask questions, get reminders, or chat through menopause moments with AI.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowAssistant((prev) => !prev)}
+              className="text-xs"
             >
-              <Tabs defaultValue="community" className="w-full">
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="community" className="flex items-center gap-2">
-                    <MessageCircle className="h-4 w-4" />
-                    Community
-                  </TabsTrigger>
-                  <TabsTrigger value="assistant" className="flex items-center gap-2">
-                    <Mic className="h-4 w-4" />
-                    AI Assistant
-                  </TabsTrigger>
-                </TabsList>
-                
-                <TabsContent value="community" className="mt-6">
-                  <CommunityChat />
-                </TabsContent>
-                
-                <TabsContent value="assistant" className="mt-6">
-                  <VoiceAssistant />
-                </TabsContent>
-              </Tabs>
-            </motion.div>
+              {showAssistant ? 'Hide AI Assistant' : 'Show AI Assistant'}
+            </Button>
+          </div>
+          {showAssistant ? (
+            <VoiceAssistant />
+          ) : (
+            <p className="text-gray-600 dark:text-gray-300">
+              Tap “Show AI Assistant” to open the voice bot without leaving the community space.
+            </p>
+          )}
+        </div>
+      </motion.div>
 
       <Navigation />
     </div>

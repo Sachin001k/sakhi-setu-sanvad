@@ -47,8 +47,8 @@ const Library = () => {
             <ArrowLeft className="w-5 h-5" />
           </Button>
           <div className="flex-1">
-            <h1 className="text-3xl font-bold">Video Library</h1>
-            <p className="text-muted-foreground mt-1">Discover and share wellness videos</p>
+            <h1 className="text-3xl font-bold text-foreground">Community Contributions</h1>
+            <p className="text-black/70 mt-1">Share videos, reflections, and resources for the wider community.</p>
           </div>
           <div className="flex gap-2">
           </div>

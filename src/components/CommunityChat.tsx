@@ -463,7 +463,7 @@ export const CommunityChat: React.FC = () => {
                   value={newMessage}
                   onChange={(e) => setNewMessage(e.target.value)}
                   placeholder="Share your thoughts with the community..."
-                  className="pr-12 min-h-[60px] max-h-[120px] resize-none text-base bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 focus:border-neon-pink focus:ring-neon-pink/20 rounded-xl text-black dark:text-white"
+                  className="pr-12 min-h-[60px] max-h-[120px] resize-none text-base bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 focus:border-neon-pink focus:ring-neon-pink/20 rounded-xl text-black dark:text-white placeholder-gray-500 dark:placeholder-white"
                   disabled={sending}
                   rows={2}
                 />

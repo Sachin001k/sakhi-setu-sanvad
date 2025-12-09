@@ -8,7 +8,8 @@ import { Slider } from "@/components/ui/slider";
 import Navigation from "@/components/Navigation";
 import { SymptomTracker } from "@/components/SymptomTracker";
 import { AIAnalytics } from "@/components/AIAnalytics";
-import { Activity, Moon, Smile, Droplets, ArrowLeft, CheckCircle2, Brain, BarChart3 } from "lucide-react";
+import Reminders from "@/components/Reminders";
+import { Activity, Moon, Smile, Droplets, ArrowLeft, CheckCircle2, Brain, Clock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -74,25 +75,33 @@ const Tracker = () => {
         className="px-6"
       >
         <Tabs defaultValue="tracker" className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="tracker" className="flex items-center gap-2">
-              <Activity className="h-4 w-4" />
-              Track Symptoms
-            </TabsTrigger>
-            <TabsTrigger value="analytics" className="flex items-center gap-2">
-              <Brain className="h-4 w-4" />
-              AI Analytics
-            </TabsTrigger>
-          </TabsList>
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="tracker" className="flex items-center gap-2">
+            <Activity className="h-4 w-4" />
+            Track Symptoms
+          </TabsTrigger>
+          <TabsTrigger value="analytics" className="flex items-center gap-2">
+            <Brain className="h-4 w-4" />
+            AI Analytics
+          </TabsTrigger>
+          <TabsTrigger value="reminders" className="flex items-center gap-2">
+            <Clock className="h-4 w-4" />
+            Reminders
+          </TabsTrigger>
+        </TabsList>
           
-          <TabsContent value="tracker" className="mt-6">
-            <SymptomTracker />
-          </TabsContent>
-          
-          <TabsContent value="analytics" className="mt-6">
-            <AIAnalytics />
-          </TabsContent>
-        </Tabs>
+        <TabsContent value="tracker" className="mt-6">
+          <SymptomTracker />
+        </TabsContent>
+         
+        <TabsContent value="analytics" className="mt-6">
+          <AIAnalytics />
+        </TabsContent>
+        
+        <TabsContent value="reminders" className="mt-6">
+          <Reminders />
+        </TabsContent>
+      </Tabs>
       </motion.div>
 
       <Navigation />

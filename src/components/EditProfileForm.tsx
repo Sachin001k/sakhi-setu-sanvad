@@ -235,6 +235,12 @@ export const EditProfileForm: React.FC<EditProfileFormProps> = ({ userProfile: p
 
       toast.success('Profile updated successfully!');
       
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('preferredLanguageUpdated', {
+          detail: { language: profile.preferred_language }
+        }));
+      }
+      
       // Create notification for profile update
       if ((window as any).createNotification) {
         (window as any).createNotification(
@@ -275,11 +281,11 @@ export const EditProfileForm: React.FC<EditProfileFormProps> = ({ userProfile: p
     <div className="space-y-6">
       <Card className="bg-white dark:bg-gray-800 backdrop-blur-sm border-0 shadow-xl">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-xl">
+          <CardTitle className="flex items-center gap-2 text-xl text-white">
             <User className="h-6 w-6 text-pink-500" />
             Edit Profile
           </CardTitle>
-          <CardDescription>
+          <CardDescription className="text-white/80">
             Update your personal information and preferences
           </CardDescription>
         </CardHeader>
@@ -287,11 +293,11 @@ export const EditProfileForm: React.FC<EditProfileFormProps> = ({ userProfile: p
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Basic Information */}
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Basic Information</h3>
+              <h3 className="text-lg font-semibold text-white">Basic Information</h3>
               
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="fullName" className="text-sm md:text-base">Full Name *</Label>
+                  <Label htmlFor="fullName" className="text-sm md:text-base text-white">Full Name *</Label>
                   <div className="relative">
                     <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                     <Input
@@ -306,7 +312,7 @@ export const EditProfileForm: React.FC<EditProfileFormProps> = ({ userProfile: p
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="age" className="text-sm md:text-base">Age</Label>
+                  <Label htmlFor="age" className="text-sm md:text-base text-white">Age</Label>
                   <div className="relative">
                     <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                     <Input
@@ -325,7 +331,7 @@ export const EditProfileForm: React.FC<EditProfileFormProps> = ({ userProfile: p
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="location" className="text-sm md:text-base">Location *</Label>
+                <Label htmlFor="location" className="text-sm md:text-base text-white">Location *</Label>
                 <div className="relative">
                   <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                   <Input
@@ -340,7 +346,7 @@ export const EditProfileForm: React.FC<EditProfileFormProps> = ({ userProfile: p
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="bio" className="text-sm md:text-base">About Me</Label>
+                <Label htmlFor="bio" className="text-sm md:text-base text-white">About Me</Label>
                 <div className="relative">
                   <FileText className="absolute left-3 top-3 text-gray-400 w-4 h-4" />
                   <Textarea
@@ -358,11 +364,11 @@ export const EditProfileForm: React.FC<EditProfileFormProps> = ({ userProfile: p
 
             {/* Contact Information */}
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Contact Information</h3>
+              <h3 className="text-lg font-semibold text-white">Contact Information</h3>
               
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="phone" className="text-sm md:text-base">Phone Number</Label>
+                  <Label htmlFor="phone" className="text-sm md:text-base text-white">Phone Number</Label>
                   <div className="relative">
                     <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                     <Input
@@ -377,7 +383,7 @@ export const EditProfileForm: React.FC<EditProfileFormProps> = ({ userProfile: p
                 </div>
 
               <div className="space-y-2">
-                <Label htmlFor="emergencyContact" className="text-sm md:text-base">Emergency Contact</Label>
+                <Label htmlFor="emergencyContact" className="text-sm md:text-base text-white">Emergency Contact</Label>
                 <Input
                   id="emergencyContact"
                   value={profile.emergency_contact}
@@ -392,11 +398,11 @@ export const EditProfileForm: React.FC<EditProfileFormProps> = ({ userProfile: p
 
             {/* Health Information */}
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Health Information</h3>
+              <h3 className="text-lg font-semibold text-white">Health Information</h3>
               
               <div>
-                <Label className="text-sm md:text-base">Medical Conditions (Optional)</Label>
-                <p className="text-xs text-gray-600 dark:text-gray-300 mb-3">Select any conditions you currently have</p>
+                <Label className="text-sm md:text-base text-white">Medical Conditions (Optional)</Label>
+                <p className="text-xs text-white/80 mb-3">Select any conditions you currently have</p>
                 <div className="flex flex-wrap gap-2 md:gap-3">
                   {medicalConditionsOptions.map((condition) => (
                     <button
@@ -416,7 +422,7 @@ export const EditProfileForm: React.FC<EditProfileFormProps> = ({ userProfile: p
               </div>
 
               <div>
-                <Label htmlFor="medications" className="text-sm md:text-base">Current Medications (Optional)</Label>
+                <Label htmlFor="medications" className="text-sm md:text-base text-white">Current Medications (Optional)</Label>
                 <Textarea
                   id="medications"
                   value={profile.current_medications?.join(', ') || ''}
@@ -430,10 +436,10 @@ export const EditProfileForm: React.FC<EditProfileFormProps> = ({ userProfile: p
 
             {/* Preferences */}
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Preferences</h3>
+              <h3 className="text-lg font-semibold text-white">Preferences</h3>
               
               <div className="space-y-2">
-                <Label htmlFor="language" className="text-sm md:text-base">Preferred Language</Label>
+                <Label htmlFor="language" className="text-sm md:text-base text-white">Preferred Language</Label>
                 <Select value={profile.preferred_language} onValueChange={(value) => handleInputChange('preferred_language', value)}>
                   <SelectTrigger className="h-11 md:h-12 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 focus:border-neon-pink focus:ring-neon-pink/20 text-black dark:text-white">
                     <SelectValue placeholder="Select your preferred language" />

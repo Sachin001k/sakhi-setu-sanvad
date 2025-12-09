@@ -220,8 +220,8 @@ const VideoLibrary = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold">Video Library</h2>
-          <p className="text-muted-foreground">Discover and publish wellness videos for the community</p>
+          <h2 className="text-2xl font-bold text-foreground">Community Contributions</h2>
+          <p className="text-black/70">Discover and publish wellness resources for the community</p>
         </div>
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
@@ -232,10 +232,10 @@ const VideoLibrary = () => {
           </DialogTrigger>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
-              <DialogTitle>Publish New Video</DialogTitle>
-              <DialogDescription>
-                Publish a wellness video for the community to discover
-              </DialogDescription>
+            <DialogTitle>Share a Contribution</DialogTitle>
+            <DialogDescription>
+              Share a wellness tip, story, or video for others to learn from
+            </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div>

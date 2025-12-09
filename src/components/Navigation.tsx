@@ -15,9 +15,9 @@ const Navigation = () => {
         const navItems = [
           { path: "/dashboard", icon: Home, label: "Home" },
           { path: "/tracker", icon: Activity, label: "Tracker" },
-          { path: "/community", icon: Users, label: "Community" },
+          { path: "/community", icon: Users, label: "Community Chat" },
           { path: "/resources", icon: BookOpen, label: "Resources" },
-          { path: "/library", icon: Video, label: "Library" },
+          { path: "/library", icon: Video, label: "Community Contributions" },
           { path: "/profile", icon: User, label: "Profile" },
         ];
 

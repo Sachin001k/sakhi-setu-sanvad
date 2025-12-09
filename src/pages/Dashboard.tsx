@@ -11,14 +11,14 @@ import GoogleTranslate from "@/components/GoogleTranslate";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import RecentActivity from "@/components/RecentActivity";
 import { supabase } from "@/integrations/supabase/client";
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const { user, signOut, loading } = useAuth();
-  const [wellnessTip, setWellnessTip] = useState<string | null>(null);
+  const [wellnessTip, setWellnessTip] = useState<{ title: string; content: string } | null>(null);
   const [hasSymptoms, setHasSymptoms] = useState(false);
 
   useEffect(() => {
@@ -27,13 +27,7 @@ const Dashboard = () => {
     }
   }, [user, loading, navigate]);
 
-  useEffect(() => {
-    if (user) {
-      fetchUserData();
-    }
-  }, [user]);
-
-  const fetchUserData = async () => {
+  const fetchUserData = useCallback(async () => {
     if (!user) return;
     
     try {
@@ -46,16 +40,44 @@ const Dashboard = () => {
 
       if (!error && symptoms && symptoms.length > 0) {
         setHasSymptoms(true);
-        // Only show tip if user has actual data
-        setWellnessTip("Keep tracking your symptoms to get personalized insights!");
       } else {
         setHasSymptoms(false);
-        setWellnessTip(null);
       }
     } catch (error) {
       console.error('Error fetching user data:', error);
     }
-  };
+  }, [user]);
+
+  useEffect(() => {
+    const fetchTip = async () => {
+      if (typeof window === "undefined") return;
+
+      try {
+        const { data, error } = await supabase
+          .from("wellness_tips")
+          .select("title, content")
+        
+
+        if (error) {
+          console.error("Failed to load wellness tips:", error);
+          return;
+        }
+
+        if (!data || data.length === 0) return;
+        console.log("Wellness tips fetched:", data);
+
+        const randomTip = data[Math.floor(Math.random() * data.length)];
+        setWellnessTip({ title: randomTip.title, content: randomTip.content });
+      } catch (error) {
+        console.error("Failed to fetch wellness tip:", error);
+      }
+    };
+
+    if (user) {
+      fetchUserData();
+      fetchTip();
+    }
+  }, [user, fetchUserData]);
 
   if (loading) {
     return (
@@ -107,7 +129,7 @@ const Dashboard = () => {
     },
     {
       icon: Users,
-      title: "Community",
+      title: "Community Chat",
       description: "New messages available",
       bgColor: "bg-secondary-light",
       iconColor: "text-secondary",
@@ -168,8 +190,8 @@ const Dashboard = () => {
     },
     {
       icon: Video,
-      title: "Video Library",
-      description: "Publish and discover wellness videos",
+      title: "Community Contributions",
+      description: "Share wellness content with others",
       color: "text-pink-500",
       bgColor: "bg-pink-50",
       onClick: () => navigate("/library")
@@ -266,7 +288,15 @@ const Dashboard = () => {
               </div>
             </div>
             <p className="text-sm sm:text-base text-foreground leading-relaxed">
-              {wellnessTip || "Start tracking your symptoms to get personalized wellness insights and recommendations!"}
+              {wellnessTip ? (
+                <>
+                  <span className="font-semibold">{wellnessTip.title}</span>
+                  <br />
+                  {wellnessTip.content}
+                </>
+              ) : (
+                "Start tracking your symptoms to get personalized wellness insights and recommendations!"
+              )}
             </p>
             <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
               <Button 

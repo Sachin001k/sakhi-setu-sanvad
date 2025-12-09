@@ -82,13 +82,13 @@ All colors MUST be HSL.
   :root {
     /* Light mode only - New color theme */
     --background: 0 0% 100%;
-    --foreground: 176 46% 30%;
+    --foreground: 0 0% 0%;
 
     --card: 0 0% 100%;
-    --card-foreground: 176 46% 30%;
+    --card-foreground: 0 0% 0%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 176 46% 30%;
+    --popover-foreground: 0 0% 0%;
 
     /* Primary: #46bdb6 (teal/cyan) - for text */
     --primary: 176 46% 51%;
@@ -111,7 +111,7 @@ All colors MUST be HSL.
     --energy-light: 30 100% 90%;
 
     --muted: 0 0% 96%;
-    --muted-foreground: 176 20% 50%;
+    --muted-foreground: 0 0% 0%;
 
     --destructive: 0 100% 60%;
     --destructive-foreground: 0 0% 100%;
@@ -157,6 +157,20 @@ All colors MUST be HSL.
 
   .glow-effect {
     box-shadow: var(--shadow-glow);
+  }
+
+  .bg-[#1f2937] {
+    color: #fff !important;
+  }
+
+  .bg-[#1f2937] * {
+    color: inherit !important;
+  }
+
+  .bg-[#1f2937] svg,
+  .bg-[#1f2937] svg * {
+    stroke: currentColor !important;
+    fill: currentColor !important;
   }
 
   .animate-float {

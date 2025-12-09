@@ -454,7 +454,7 @@ const VoiceAssistant: React.FC = () => {
   }
 
   return (
-    <Card className="bg-white dark:bg-gray-800 backdrop-blur-sm border-0 shadow-xl">
+    <Card className="bg-white text-black border border-gray-200 shadow-xl">
       <CardHeader>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -469,7 +469,7 @@ const VoiceAssistant: React.FC = () => {
               variant="outline"
               size="sm"
               onClick={() => setIsMuted(!isMuted)}
-              className="flex items-center gap-2"
+              className="flex items-center gap-2 text-black"
             >
               {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
               {isMuted ? 'Unmute' : 'Mute'}
@@ -478,7 +478,7 @@ const VoiceAssistant: React.FC = () => {
               variant="outline"
               size="sm"
               onClick={clearMessages}
-              className="flex items-center gap-2"
+              className="flex items-center gap-2 text-black"
             >
               <RotateCcw className="w-4 h-4" />
               Clear
@@ -624,11 +624,11 @@ const VoiceAssistant: React.FC = () => {
               className="space-y-2"
             >
               <form onSubmit={handleTextInput} className="flex gap-2">
-                  <Textarea
+                <Textarea
                   value={textInput}
                   onChange={(e) => setTextInput(e.target.value)}
                   placeholder="Type your question about menopause, symptoms, or wellness..."
-                  className="flex-1 min-h-[80px] bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 focus:border-neon-pink focus:ring-neon-pink/20 text-black dark:text-white"
+                  className="flex-1 min-h-[80px] bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 focus:border-neon-pink focus:ring-neon-pink/20 text-black dark:text-white placeholder-gray-500 dark:placeholder-white"
                   disabled={isProcessing}
                 />
                 <Button
