@@ -165,6 +165,16 @@ CREATE TABLE IF NOT EXISTS public.notifications (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Contact messages submissions
+CREATE TABLE IF NOT EXISTS public.contact_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  full_name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  message TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'landing_page',
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
 -- Enhanced profile table
 CREATE TABLE IF NOT EXISTS public.user_profiles (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,

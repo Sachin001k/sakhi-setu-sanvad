@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Heart, Mail, Phone, MapPin, Facebook, Twitter, Instagram, Linkedin } from 'lucide-react';
+import { Heart, Mail, MapPin, Facebook, Twitter, Instagram, Linkedin } from 'lucide-react';
 
 const ResponsiveFooter = () => {
   const footerSections = [
@@ -30,26 +30,21 @@ const ResponsiveFooter = () => {
         { label: 'Expert Talks', href: '#' },
       ]
     },
-    {
-      title: 'Contact Info',
-      links: [
-        { 
-          label: 'support@sakhisetu.com', 
-          href: 'mailto:support@sakhisetu.com',
-          icon: Mail 
-        },
-        { 
-          label: '+91 98765 43210', 
-          href: 'tel:+919876543210',
-          icon: Phone 
-        },
-        { 
-          label: 'Mumbai, Maharashtra', 
-          href: '#',
-          icon: MapPin 
-        },
-      ]
-    }
+        {
+          title: 'Contact Info',
+          links: [
+            { 
+              label: 'support@sakhisetu.com', 
+              href: 'mailto:support@sakhisetu.com',
+              icon: Mail 
+            },
+            { 
+              label: 'Mumbai, Maharashtra', 
+              href: '#',
+              icon: MapPin 
+            },
+          ]
+        }
   ];
 
   const socialLinks = [

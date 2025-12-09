@@ -125,6 +125,32 @@ export type Database = {
           created_at?: string
         }
       }
+      contact_messages: {
+        Row: {
+          id: string
+          full_name: string
+          email: string
+          message: string
+          source: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          full_name: string
+          email: string
+          message: string
+          source?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          full_name?: string
+          email?: string
+          message?: string
+          source?: string
+          created_at?: string
+        }
+      }
       notifications: {
         Row: {
           id: string

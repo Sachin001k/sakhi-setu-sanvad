@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,10 +10,14 @@ import Background3D from '@/components/3D/Background3D';
 import ParticlesBackground from '@/components/3D/Particles';
 import ResponsiveHeader from '@/components/ResponsiveHeader';
 import ResponsiveFooter from '@/components/ResponsiveFooter';
+import { supabase } from '@/integrations/supabase/client';
 
 const LandingPage = () => {
   const navigate = useNavigate();
   const { user, loading } = useAuth();
+  const [contactForm, setContactForm] = useState({ name: '', email: '', message: '' });
+  const [contactStatus, setContactStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
+  const [contactError, setContactError] = useState('');
 
   useEffect(() => {
     if (!loading && user) {
@@ -39,6 +43,49 @@ const LandingPage = () => {
   if (user) {
     return null;
   }
+
+  const handleContactChange = (field: keyof typeof contactForm, value: string) => {
+    setContactForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleContactSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const trimmedName = contactForm.name.trim();
+    const trimmedEmail = contactForm.email.trim();
+    const trimmedMessage = contactForm.message.trim();
+
+    if (!trimmedName || !trimmedEmail || !trimmedMessage) {
+      setContactError('Please fill in all fields before submitting.');
+      setContactStatus('error');
+      return;
+    }
+
+    setContactStatus('submitting');
+    setContactError('');
+
+    const { error } = await supabase.from('contact_messages').insert([
+      {
+        full_name: trimmedName,
+        email: trimmedEmail,
+        message: trimmedMessage,
+        source: 'landing_page'
+      }
+    ]);
+
+    if (error) {
+      setContactError(error.message);
+      setContactStatus('error');
+      return;
+    }
+
+    setContactStatus('success');
+    setContactForm({ name: '', email: '', message: '' });
+  };
+
+  const isContactFormValid =
+    Boolean(contactForm.name.trim() && contactForm.email.trim() && contactForm.message.trim());
+  const isSubmitDisabled = contactStatus === 'submitting' || !isContactFormValid;
 
   const features = [
     {
@@ -107,7 +154,7 @@ const LandingPage = () => {
       <ParticlesBackground />
       
       {/* Animated Background Elements */}
-      <div className="absolute inset-0 overflow-hidden">
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
         {/* Gradient Orbs */}
         <motion.div
           className="absolute top-20 left-20 w-96 h-96 rounded-full blur-3xl"
@@ -553,17 +600,6 @@ const LandingPage = () => {
             >
               <div className="flex items-start space-x-4">
                 <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ backgroundColor: 'rgba(250, 160, 204, 0.1)' }}>
-                  <Phone className="w-6 h-6" style={{ color: '#faa0cc' }} />
-                </div>
-                <div>
-                  <h3 className="text-xl font-semibold mb-2" style={{ color: '#46bdb6' }}>Phone Support</h3>
-                  <p style={{ color: '#46bdb6' }}>+91 98765 43210</p>
-                  <p className="text-sm" style={{ color: '#46bdb6' }}>Mon-Fri, 9AM-6PM IST</p>
-                </div>
-              </div>
-
-              <div className="flex items-start space-x-4">
-                <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ backgroundColor: 'rgba(250, 160, 204, 0.1)' }}>
                   <MapPin className="w-6 h-6" style={{ color: '#faa0cc' }} />
                 </div>
                 <div>
@@ -597,15 +633,17 @@ const LandingPage = () => {
               style={{ backgroundColor: 'rgba(255, 255, 255, 0.9)' }}
             >
               <h3 className="text-2xl font-bold mb-6" style={{ color: '#46bdb6' }}>Send us a Message</h3>
-              <form className="space-y-6">
+              <form className="space-y-6" onSubmit={handleContactSubmit}>
                 <div>
                   <label className="block text-sm font-medium mb-2" style={{ color: '#46bdb6' }}>
                     Full Name
                   </label>
                   <input
                     type="text"
-                    className="w-full px-4 py-3 border rounded-lg bg-white"
-                    style={{ borderColor: '#46bdb6', color: '#46bdb6' }}
+                    value={contactForm.name}
+                    onChange={(event) => handleContactChange('name', event.target.value)}
+                    className="w-full px-4 py-3 border rounded-lg bg-white text-[#46bdb6]"
+                    style={{ borderColor: '#46bdb6' }}
                     placeholder="Your full name"
                   />
                 </div>
@@ -615,8 +653,10 @@ const LandingPage = () => {
                   </label>
                   <input
                     type="email"
-                    className="w-full px-4 py-3 border rounded-lg bg-white"
-                    style={{ borderColor: '#46bdb6', color: '#46bdb6' }}
+                    value={contactForm.email}
+                    onChange={(event) => handleContactChange('email', event.target.value)}
+                    className="w-full px-4 py-3 border rounded-lg bg-white text-[#46bdb6]"
+                    style={{ borderColor: '#46bdb6' }}
                     placeholder="your.email@example.com"
                   />
                 </div>
@@ -626,14 +666,29 @@ const LandingPage = () => {
                   </label>
                   <textarea
                     rows={4}
-                    className="w-full px-4 py-3 border rounded-lg bg-white"
-                    style={{ borderColor: '#46bdb6', color: '#46bdb6' }}
+                    value={contactForm.message}
+                    onChange={(event) => handleContactChange('message', event.target.value)}
+                    className="w-full px-4 py-3 border rounded-lg bg-white text-[#46bdb6]"
+                    style={{ borderColor: '#46bdb6' }}
                     placeholder="Tell us how we can help you..."
                   ></textarea>
                 </div>
-                <Button className="w-full text-white py-3 text-lg" style={{ backgroundColor: '#faa0cc' }}>
-                  Send Message
+                <Button
+                  type="submit"
+                  disabled={isSubmitDisabled}
+                  className="w-full text-white py-3 text-lg disabled:opacity-70 disabled:cursor-not-allowed"
+                  style={{ backgroundColor: '#faa0cc' }}
+                >
+                  {contactStatus === 'submitting' ? 'Sending...' : 'Send Message'}
                 </Button>
+                {contactStatus === 'success' && (
+                  <p className="text-sm text-emerald-500">
+                    Thank you! Your message has been received and we will respond shortly.
+                  </p>
+                )}
+                {contactStatus === 'error' && contactError && (
+                  <p className="text-sm text-red-500">{contactError}</p>
+                )}
               </form>
             </motion.div>
           </div>

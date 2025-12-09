@@ -246,7 +246,7 @@ const AuthPage = () => {
                     transition={{ duration: 0.3 }}
                   >
                     <TabsContent value="login" className="mt-0">
-                      <LoginForm />
+                      <LoginForm onSwitchToSignup={() => setActiveTab('signup')} />
                     </TabsContent>
                     
                     <TabsContent value="signup" className="mt-0">

@@ -7,12 +7,16 @@ import { Eye, EyeOff, Mail, Lock, Loader2, Heart } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 
-export const LoginForm: React.FC = () => {
+interface LoginFormProps {
+  onSwitchToSignup: () => void;
+}
+
+export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { signIn } = useAuth();
+  const { signIn, resetPassword } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,6 +33,24 @@ export const LoginForm: React.FC = () => {
       toast.error('An unexpected error occurred');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email.trim()) {
+      toast.error('Enter the email you used to sign up so we can send a reset link.');
+      return;
+    }
+
+    try {
+      const { error } = await resetPassword(email.trim());
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+      toast.success('Reset instructions sent to your inbox.');
+    } catch (error) {
+      toast.error('Unable to send reset link right now. Please try again later.');
     }
   };
 
@@ -136,18 +158,21 @@ export const LoginForm: React.FC = () => {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.5 }}
-        className="text-center"
+        className="space-y-2 text-center text-sm text-gray-600 dark:text-gray-300"
       >
-        <p className="text-sm text-gray-600 dark:text-gray-300">
-          Don't have an account?{' '}
+        <button
+          type="button"
+          onClick={handleForgotPassword}
+          className="w-full text-left text-pink-600 dark:text-pink-400 font-medium hover:underline"
+        >
+          Forgot password?
+        </button>
+        <p className="text-gray-600 dark:text-gray-300">
+          Don&apos;t have an account?{' '}
           <button
             type="button"
             className="text-pink-600 dark:text-pink-400 font-medium hover:underline"
-            onClick={() => {
-              // This will be handled by the parent component
-              const signupTab = document.querySelector('[value="signup"]') as HTMLElement;
-              signupTab?.click();
-            }}
+            onClick={onSwitchToSignup}
           >
             Sign up here
           </button>

@@ -372,7 +372,7 @@ export const EditProfileForm: React.FC<EditProfileFormProps> = ({ userProfile: p
                       type="tel"
                       value={profile.phone}
                       onChange={(e) => handleInputChange('phone', e.target.value)}
-                      placeholder="+91 9876543210"
+                      placeholder="Your phone number"
                       className="pl-10 h-11 md:h-12 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 focus:border-neon-pink focus:ring-neon-pink/20 text-black dark:text-white"
                     />
                   </div>
@@ -480,4 +480,3 @@ export const EditProfileForm: React.FC<EditProfileFormProps> = ({ userProfile: p
     </div>
   );
 };
-
