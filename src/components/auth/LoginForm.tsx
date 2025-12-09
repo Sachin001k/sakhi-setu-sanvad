@@ -16,6 +16,9 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [resetPanelOpen, setResetPanelOpen] = useState(false);
+  const [resetStatus, setResetStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
+  const [resetMessage, setResetMessage] = useState('');
   const { signIn, resetPassword } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -36,21 +39,39 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
     }
   };
 
-  const handleForgotPassword = async () => {
+  const openResetPanel = () => {
+    setResetPanelOpen(true);
+    setResetStatus('idle');
+    setResetMessage('');
+  };
+
+  const closeResetPanel = () => {
+    setResetPanelOpen(false);
+  };
+
+  const handleSendResetLink = async () => {
     if (!email.trim()) {
-      toast.error('Enter the email you used to sign up so we can send a reset link.');
+      setResetStatus('error');
+      setResetMessage('Enter the email associated with your account first.');
       return;
     }
+
+    setResetStatus('sending');
+    setResetMessage('');
 
     try {
       const { error } = await resetPassword(email.trim());
       if (error) {
-        toast.error(error.message);
+        setResetStatus('error');
+        setResetMessage(error.message);
         return;
       }
-      toast.success('Reset instructions sent to your inbox.');
+
+      setResetStatus('success');
+      setResetMessage('Reset instructions sent to your inbox.');
     } catch (error) {
-      toast.error('Unable to send reset link right now. Please try again later.');
+      setResetStatus('error');
+      setResetMessage('Unable to send reset link right now. Please try again later.');
     }
   };
 
@@ -160,13 +181,45 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSwitchToSignup }) => {
         transition={{ delay: 0.5 }}
         className="space-y-2 text-center text-sm text-gray-600 dark:text-gray-300"
       >
-        <button
-          type="button"
-          onClick={handleForgotPassword}
-          className="w-full text-left text-pink-600 dark:text-pink-400 font-medium hover:underline"
-        >
-          Forgot password?
-        </button>
+        {resetPanelOpen ? (
+          <div className="space-y-3 border border-gray-200 dark:border-gray-700 rounded-xl p-4 text-left">
+            <p className="text-base font-medium text-gray-700 dark:text-gray-300">
+              We&apos;ll send a secure link to reset your password. Use the email you entered above.
+            </p>
+            <div className="flex flex-col gap-2">
+              <Button
+                type="button"
+                disabled={resetStatus === 'sending'}
+                className="w-full text-white bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600"
+                onClick={handleSendResetLink}
+              >
+                {resetStatus === 'sending' ? 'Sending reset link...' : 'Send reset link'}
+              </Button>
+              <button
+                type="button"
+                onClick={closeResetPanel}
+                className="text-sm text-pink-600 dark:text-pink-400 font-medium hover:underline text-left"
+              >
+                Back to login
+              </button>
+            </div>
+            {resetMessage && (
+              <p
+                className={`text-sm ${resetStatus === 'success' ? 'text-emerald-500' : 'text-red-500'}`}
+              >
+                {resetMessage}
+              </p>
+            )}
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={openResetPanel}
+            className="w-full text-left text-pink-600 dark:text-pink-400 font-medium hover:underline"
+          >
+            Forgot password?
+          </button>
+        )}
         <p className="text-gray-600 dark:text-gray-300">
           Don&apos;t have an account?{' '}
           <button

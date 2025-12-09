@@ -14,8 +14,6 @@ import {
   Calendar,
   Save,
   Loader2,
-  CheckCircle,
-  AlertCircle,
   FileText
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -378,18 +376,19 @@ export const EditProfileForm: React.FC<EditProfileFormProps> = ({ userProfile: p
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="emergencyContact" className="text-sm md:text-base">Emergency Contact</Label>
-                  <Input
-                    id="emergencyContact"
-                    value={profile.emergency_contact}
-                    onChange={(e) => handleInputChange('emergency_contact', e.target.value)}
-                    placeholder="Emergency contact name & number"
-                    className="h-11 md:h-12 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 focus:border-neon-pink focus:ring-neon-pink/20 text-black dark:text-white"
-                  />
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="emergencyContact" className="text-sm md:text-base">Emergency Contact</Label>
+                <Input
+                  id="emergencyContact"
+                  value={profile.emergency_contact}
+                  onChange={(e) => handleInputChange('emergency_contact', e.target.value)}
+                  placeholder="Emergency contact name & number"
+                  className="h-11 md:h-12 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 focus:border-neon-pink focus:ring-neon-pink/20 text-black dark:text-white"
+                />
               </div>
             </div>
+          </div>
+
 
             {/* Health Information */}
             <div className="space-y-4">
