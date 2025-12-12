@@ -44,7 +44,7 @@ const GeminiErrorModal = () => {
           </p>
         )}
         {error.detail && (
-          <div className="mt-3 rounded-lg bg-gray-100 p-3 font-mono text-xs text-gray-700 break-words">
+          <div className="mt-3 max-h-60 overflow-auto rounded-lg bg-gray-100 p-3 font-mono text-xs text-gray-700 break-words whitespace-pre-wrap">
             {error.detail}
           </div>
         )}
