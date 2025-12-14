@@ -11,6 +11,7 @@ A Vite + React TypeScript app that delivers menopause support tools like symptom
 Set environment variables (or a `.env` file) for your Supabase project:
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_PUBLISHABLE_KEY`
+- `VITE_GEMINI_API_KEYS` (comma-separated Gemini API keys so the AI client can rotate them after hitting quota)
 
 ## Supabase setup
 A single end-to-end script now lives at `supabase_schema.sql` (root). Run it once in the Supabase SQL Editor to create:

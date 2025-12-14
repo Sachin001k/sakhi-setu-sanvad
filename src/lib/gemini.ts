@@ -1,14 +1,22 @@
 // Gemini AI Integration
 // Using Gemini 2.5 Flash model with a sequence of API keys to handle quota limits
 
-const GEMINI_API_KEYS = [
-  'AIzaSyBscWNBOsm520KHCKeUdT7LlLOtXSsf2VI',
-  'AIzaSyCFSs4ccc_HyvmM3j_psuivNmZU_1-FU-I',
-  'AIzaSyAv39RONOpayhO49zQkF7nZvZTDM5-FRAk',
-  'AIzaSyCZxi22Ha7FTJvWTZhD7Qe2qWcTA-gjRTg',
-];
+const GEMINI_API_KEYS = parseGeminiApiKeys(import.meta.env.VITE_GEMINI_API_KEYS);
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent';
 const GEMINI_QUOTA_MESSAGE = 'Our AI quota is taking a well-earned tea break—every key is temporarily exhausted. Please try again in a few minutes once the models have recharged.';
+const GEMINI_CLIENT_MESSAGE = 'Gemini API keys were not provided; set VITE_GEMINI_API_KEYS in your environment.';
+
+function parseGeminiApiKeys(raw?: string): string[] {
+  if (!raw) {
+    console.warn(GEMINI_CLIENT_MESSAGE);
+    return [];
+  }
+
+  return raw
+    .split(',')
+    .map((key) => key.trim())
+    .filter(Boolean);
+}
 
 export interface GeminiResponse {
   candidates: Array<{
@@ -44,6 +52,9 @@ export class GeminiModel {
   private baseUrl: string;
 
   constructor(apiKeys: string[] = GEMINI_API_KEYS) {
+    if (!apiKeys.length) {
+      throw new Error('Gemini API keys are missing; please configure VITE_GEMINI_API_KEYS');
+    }
     this.apiKeys = apiKeys;
     this.baseUrl = GEMINI_API_URL;
   }
