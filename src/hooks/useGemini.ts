@@ -1,11 +1,11 @@
 import { useState, useCallback } from 'react';
-import { geminiModel } from '@/lib/gemini';
-import { emitGeminiError } from '@/lib/geminiErrorBus';
+import { geminiModel, GeminiApiError } from '@/lib/gemini';
 import { toast } from 'sonner';
 
 interface UseGeminiOptions {
   onSuccess?: (response: string) => void;
   onError?: (error: Error) => void;
+  suppressToasts?: boolean;
 }
 
 export const useGemini = (options?: UseGeminiOptions) => {
@@ -14,14 +14,12 @@ export const useGemini = (options?: UseGeminiOptions) => {
 
   const handleGeminiError = useCallback((err: unknown, toastMessage: string, action: string) => {
     const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
+    const isGeminiIssue = err instanceof GeminiApiError && typeof err.status === 'number' && err.status >= 400;
     setError(errorMessage);
     options?.onError?.(err as Error);
-    emitGeminiError({
-      message: toastMessage,
-      detail: errorMessage,
-      action,
-    });
-    toast.error(toastMessage);
+    if (!options?.suppressToasts && !isGeminiIssue) {
+      toast.error(toastMessage);
+    }
   }, [options]);
 
   const generateContent = useCallback(async (

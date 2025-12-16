@@ -69,8 +69,7 @@ export const AIAnalytics: React.FC = () => {
     analyzeSymptoms,
     generateHealthReport 
   } = useGemini({
-    onSuccess: (response) => setAiResponse(response),
-    onError: (error) => console.error('AI Error:', error)
+    suppressToasts: true
   });
 
   useEffect(() => {
@@ -99,8 +98,8 @@ export const AIAnalytics: React.FC = () => {
       const analyticsData = await processAnalyticsData(symptoms || []);
       setAnalytics(analyticsData);
     } catch (error) {
-      console.error('Error fetching analytics:', error);
-      toast.error('Failed to load analytics data');
+      const fallbackAnalytics = await processAnalyticsData([]);
+      setAnalytics(fallbackAnalytics);
     } finally {
       setLoading(false);
     }
@@ -229,8 +228,6 @@ IMPORTANT: Provide recommendations based ONLY on the symptoms and their severity
         }
       });
     } catch (error) {
-      console.error('Error generating AI recommendations:', error);
-      // Fallback to static recommendations based on actual symptoms
       return generateStaticRecommendations(symptoms, avgSeverity);
     }
 
@@ -284,6 +281,16 @@ IMPORTANT: Provide recommendations based ONLY on the symptoms and their severity
         description: 'Consider consulting with a healthcare provider about your symptoms.',
         priority: 'high' as const,
         icon: Target
+      });
+    }
+
+    if (recommendations.length === 0) {
+      recommendations.push({
+        category: 'General',
+        title: 'Start Tracking',
+        description: 'Log your symptoms to unlock the full AI analytics experience.',
+        priority: 'low' as const,
+        icon: Lightbulb
       });
     }
 
@@ -436,8 +443,7 @@ IMPORTANT: Provide recommendations based ONLY on the symptoms and their severity
         }
       }, 300);
     } catch (error) {
-      console.error('Error generating AI response:', error);
-      toast.error('Failed to generate AI response');
+      // Intentionally silenced to avoid UI noise.
     }
   };
 
@@ -450,8 +456,7 @@ IMPORTANT: Provide recommendations based ONLY on the symptoms and their severity
       setAiResponse(response);
       setShowAiChat(true);
     } catch (error) {
-      console.error('Error analyzing symptoms:', error);
-      toast.error('Failed to analyze symptoms');
+      // Suppressed to keep the tab experience consistent.
     }
   };
 

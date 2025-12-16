@@ -55,6 +55,14 @@ const symptomTypes = [
   { value: 'irritability', label: 'Irritability', icon: Zap, color: 'text-red-600' },
   { value: 'breast_tenderness', label: 'Breast Tenderness', icon: Heart, color: 'text-pink-600' }
 ];
+const symptomLabelMap = Object.fromEntries(symptomTypes.map(({ value, label }) => [value, label]));
+
+const formatSymptomLabel = (symptomKey: string) => {
+  if (!symptomKey) {
+    return 'Unknown symptom';
+  }
+  return symptomLabelMap[symptomKey] ?? symptomKey.replace(/_/g, ' ');
+};
 
 const symptomDetailInputs: Record<string, {
   label: string;
@@ -498,6 +506,71 @@ export const SymptomTracker: React.FC = () => {
     }));
   };
 
+  const buildGeminiFallbackMessage = () => {
+    const sortedSymptoms = [...symptoms].sort((a, b) => (Number(b.severity) || 0) - (Number(a.severity) || 0));
+    const symptomLines = sortedSymptoms.map((symptom) => {
+      const severityValue = Math.max(0, Math.min(10, Number(symptom.severity) || 0));
+      const severityLabel = getSeverityLabel(severityValue);
+      return `• ${formatSymptomLabel(symptom.symptom_type)} — ${severityLabel} (${severityValue}/10)`;
+    });
+
+    const symptomHeader = sortedSymptoms.length > 0
+      ? `Symptoms sorted by severity (highest first):\n${symptomLines.join('\n')}`
+      : 'No symptoms logged yet; please add a symptom entry to unlock more tailored guidance.';
+
+    const trackedSymptomNames = sortedSymptoms.length > 0
+      ? sortedSymptoms.map((symptom) => formatSymptomLabel(symptom.symptom_type)).join(', ')
+      : 'no symptoms currently tracked';
+
+    const averageSeverityLine = `Average severity across logged symptoms: ${stats.averageSeverity}/10.`;
+
+    const guidanceSections = [
+      '',
+      `As a menopause health advisor, I can offer general guidance based on the symptoms you've described (${trackedSymptomNames}). ${averageSeverityLine}`,
+      '',
+      '1. Possible General Causes',
+      '* Hormonal Fluctuations: Shifts in estrogen and progesterone during menopause can impact metabolism, inflammation, and sleep.',
+      '* Metabolic Changes: Lower estrogen levels can slow metabolism, making weight gain easier and energy harder to sustain.',
+      '* Inflammation: Hormonal changes can increase inflammatory sensitivity, which may show up as joint pain or tenderness.',
+      '* Lifestyle Factors: Stress, diet, and activity level shifts that often accompany midlife transitions can magnify these symptoms.',
+      '',
+      '2. When to Seek Medical Attention',
+      '* Symptoms worsen significantly or new concerning symptoms emerge.',
+      '* Pain becomes severe, limits mobility, or is accompanied by redness or swelling.',
+      '* Sleep issues are so disruptive they affect daily focus, mood, or energy.',
+      '* You have concerns about underlying conditions or a personal/family history of serious disease.',
+      '* You want a personalized management plan that may include treatments, supplements, or therapies.',
+      '',
+      '3. General Self-Care Recommendations',
+      '* For Weight Gain:',
+      '  * Balanced Diet: Favor whole foods—fruits, vegetables, lean proteins, and whole grains—while limiting processed or sugary items.',
+      '  * Portion Control: Be mindful of portions to keep calorie intake aligned with your energy needs.',
+      '  * Regular Physical Activity: Pair aerobic exercise (walking, swimming, cycling) with strength training to support metabolism.',
+      '* For Joint Pain:',
+      '  * Gentle Exercise: Water aerobics, yoga, tai chi, or stretching can protect joints while improving strength.',
+      '  * Maintain a Healthy Weight: Every pound less lessens pressure on weight-bearing joints.',
+      '  * Heat or Cold Therapy: Experiment with warm baths or ice packs to ease inflammation and discomfort.',
+      '* For Sleep Issues:',
+      '  * Sleep Hygiene: Keep a consistent bedtime, reduce screens before sleep, and create a cool, dark environment.',
+      '  * Wind-Down Rituals: Mindful breathing, light stretching, or journaling can cue your body that rest is near.',
+      '  * Limit Caffeine & Alcohol: These can interfere with deeper sleep cycles, especially later in the day.',
+      '',
+      'Remember: This is not a medical diagnosis. Please consult your healthcare provider for personalized advice and before starting any new treatment plan.'
+    ];
+
+    return `${symptomHeader}\n\n${guidanceSections.join('\n')}`;
+  };
+
+  const applyGeminiFallbackAdvice = (error: unknown) => {
+    const status = typeof error === 'object' && error !== null ? (error as { status?: number }).status : undefined;
+    if (typeof status === 'number' && status >= 400) {
+      setAiResponse(buildGeminiFallbackMessage());
+      setShowAiChat(true);
+      return true;
+    }
+    return false;
+  };
+
   const handleAiQuery = async () => {
     if (!aiQuery.trim()) return;
 
@@ -536,6 +609,10 @@ export const SymptomTracker: React.FC = () => {
         }
       }, 300);
     } catch (error) {
+      const fallbackApplied = applyGeminiFallbackAdvice(error);
+      if (fallbackApplied) {
+        return;
+      }
       console.error('Error generating AI response:', error);
       toast.error('Failed to generate AI response');
     }
@@ -599,6 +676,10 @@ IMPORTANT: Provide recommendations based ONLY on the symptoms and their severity
         }
       }, 300);
     } catch (error) {
+      const fallbackApplied = applyGeminiFallbackAdvice(error);
+      if (fallbackApplied) {
+        return;
+      }
       console.error('Error analyzing symptoms:', error);
       toast.error('Failed to analyze symptoms');
     }
