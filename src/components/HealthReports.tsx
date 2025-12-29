@@ -136,8 +136,8 @@ const HealthReports = () => {
       <div className="space-y-4">
         {/* Header */}
         <div>
-          <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">Wellness Reports</h2>
-          <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400 mt-1">AI-powered health insights based on your tracked symptoms</p>
+          <h2 className="text-xl sm:text-2xl font-bold text-black">Wellness Reports</h2>
+          <p className="text-sm sm:text-base text-black/70 mt-1">AI-powered health insights based on your tracked symptoms</p>
         </div>
         
         {/* Controls */}
@@ -166,7 +166,7 @@ const HealthReports = () => {
           <Button
             onClick={() => generateReport(selectedPeriod)}
             disabled={generating || aiLoading}
-            className="w-full sm:w-auto bg-white from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 h-9 text-xs sm:text-sm"
+            className="w-full sm:w-auto bg-white from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 h-9 text-xs sm:text-sm text-black"
           >
             {generating || aiLoading ? (
               <Clock className="w-3 h-3 sm:w-4 sm:h-4 mr-2 animate-spin" />
@@ -186,11 +186,11 @@ const HealthReports = () => {
       {aiReport && (
         <Card className="mt-6 bg-white  border-0 shadow-xl">
           <CardHeader className="pb-4">
-            <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
+            <CardTitle className="flex items-center gap-2 text-lg sm:text-xl text-black">
               <Heart className="w-4 h-4 sm:w-5 sm:h-5 text-pink-500" />
               <span className="break-words">Wellness Report for {user?.user_metadata?.full_name || 'User'}</span>
                       </CardTitle>
-            <CardDescription className="text-sm">
+            <CardDescription className="text-sm text-black/80">
               AI-powered health insights based on your {selectedPeriod} symptom tracking
                       </CardDescription>
           </CardHeader>

@@ -21,7 +21,6 @@ const SelectTrigger = React.forwardRef<
       className,
     )}
     {...props}
-    translate="no"
   >
     {children}
     <SelectPrimitive.Icon asChild>
@@ -74,7 +73,6 @@ const SelectContent = React.forwardRef<
       )}
       position={position}
       {...props}
-      translate="no"
     >
       <SelectScrollUpButton />
       <SelectPrimitive.Viewport
@@ -111,7 +109,6 @@ const SelectItem = React.forwardRef<
       className,
     )}
     {...props}
-    translate="no"
   >
     <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
       <SelectPrimitive.ItemIndicator>
