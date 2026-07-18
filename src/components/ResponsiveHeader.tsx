@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
-import { Heart, Menu, X, Globe } from 'lucide-react';
+import { Heart, Menu, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import GoogleTranslate from '@/components/GoogleTranslate';
 
@@ -12,12 +12,19 @@ const ResponsiveHeader = () => {
   const menuItems = [
     { label: 'Home', href: '#home' },
     { label: 'Features', href: '#features' },
+    { label: 'Resources', href: '/resources' },
     // { label: 'Testimonials', href: '#testimonials' }, // temporarily hidden
     { label: 'About', href: '#about' },
     { label: 'Contact', href: '#contact' },
   ];
 
   const scrollToSection = (href: string) => {
+    if (href.startsWith('/')) {
+      navigate(href);
+      setIsMenuOpen(false);
+      return;
+    }
+
     const element = document.querySelector(href);
     if (element) {
       element.scrollIntoView({ behavior: 'smooth' });
@@ -45,10 +52,8 @@ const ResponsiveHeader = () => {
       className="fixed top-0 left-0 right-0 z-50 backdrop-blur-lg border-b"
       style={{ backgroundColor: 'rgba(255, 255, 255, 0.8)', borderColor: 'rgba(70, 189, 182, 0.2)' }}
     >
-      
-    <div className='h-8 w-full backdrop-blur-lg' style={{ backgroundColor: 'rgba(255, 255, 255, 0.8)' }}></div>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
+          <div className="flex items-center justify-between gap-3 min-h-16 py-3">
           {/* Logo */}
           <motion.div
             className="flex items-center gap-3 cursor-pointer"
@@ -104,7 +109,7 @@ const ResponsiveHeader = () => {
           {/* Right side controls */}
           <div className="flex items-center gap-2 sm:gap-4">
             {/* Language and Theme Controls */}
-            <div className="flex items-center gap-2">
+            <div className="hidden sm:flex items-center gap-2">
               <GoogleTranslate />
             </div>
 
@@ -151,6 +156,9 @@ const ResponsiveHeader = () => {
               style={{ borderColor: 'rgba(70, 189, 182, 0.2)' }}
             >
               <nav className="py-4 space-y-2">
+                <div className="px-4 pb-3 sm:hidden">
+                  <GoogleTranslate />
+                </div>
                 {menuItems.map((item, index) => (
                   <motion.button
                     key={index}

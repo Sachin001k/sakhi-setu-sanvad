@@ -7,73 +7,43 @@ All colors MUST be HSL.
 */
 
 
-/* Hide Google Translate top banner */
-.goog-te-banner-frame.skiptranslate {
+/* Keep Google Translate widget, but hide Google's injected top banner/message bar */
+.goog-te-banner-frame,
+.goog-te-banner-frame.skiptranslate,
+iframe.skiptranslate,
+iframe.goog-te-banner-frame,
+#goog-gt-tt,
+.goog-tooltip,
+.goog-tooltip:hover {
   display: none !important;
+  visibility: hidden !important;
+  height: 0 !important;
 }
 
+body,
+html {
+  top: 0 !important;
+}
+
+.skiptranslate {
+  top: 0 !important;
+}
 
 /* Hide Google logo link in widget dropdown */
-.goog-logo-link {
+.goog-logo-link,
+.goog-te-gadget .goog-te-gadget-icon {
   display: none !important;
 }
 
-/* Google Translate Widget Styling */
-.google-translate-container {
-  display: flex !important;
-  align-items: center !important;
-  min-height: 32px !important;
-}
-
-.goog-te-gadget {
-  font-family: inherit !important;
-  font-size: 14px !important;
-  display: block !important;
-}
-
-.goog-te-gadget-simple {
-  background: transparent !important;
-  border: 1px solid #d1d5db !important;
-  border-radius: 6px !important;
-  padding: 4px 8px !important;
-  min-width: 120px !important;
-  display: block !important;
-}
-
-.goog-te-gadget-simple .goog-te-menu-value {
-  color: #374151 !important;
-  font-size: 14px !important;
-}
-
-.goog-te-gadget-simple .goog-te-menu-value span:first-child {
+/* Hide Google Translate widget completely, as we use a custom dropdown UI */
+#google_translate_element,
+.goog-te-gadget,
+.goog-te-combo {
   display: none !important;
-}
-
-.goog-te-gadget-simple .goog-te-menu-value span:last-child {
-  display: inline !important;
-}
-
-/* Hide Google branding */
-.goog-te-gadget img {
-  display: none !important;
-}
-
-/* Style the dropdown */
-.goog-te-menu2 {
-  background: white !important;
-  border: 1px solid #e5e7eb !important;
-  border-radius: 8px !important;
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
-  margin-top: 4px !important;
-}
-
-.goog-te-menu2-item {
-  padding: 8px 12px !important;
-  font-size: 14px !important;
-}
-
-.goog-te-menu2-item:hover {
-  background: #f3f4f6 !important;
+  visibility: hidden !important;
+  width: 0 !important;
+  height: 0 !important;
+  overflow: hidden !important;
 }
 
 
@@ -192,39 +162,4 @@ All colors MUST be HSL.
   }
 }
 
-/* Google Translate Widget Styling */
-#google_translate_element {
-  font-size: 12px !important;
-}
-
-#google_translate_element select {
-  font-size: 12px !important;
-  padding: 4px 8px !important;
-  border-radius: 4px !important;
-  border: 1px solid #d1d5db !important;
-  background-color: white !important;
-  color: #374151 !important;
-}
-
-#google_translate_element .goog-te-gadget {
-  font-size: 12px !important;
-  color: #374151 !important;
-}
-
-#google_translate_element .goog-te-gadget-simple {
-  background-color: white !important;
-  border: 1px solid #d1d5db !important;
-  border-radius: 4px !important;
-  padding: 4px 8px !important;
-  font-size: 12px !important;
-}
-
-#google_translate_element .goog-te-gadget-simple .goog-te-menu-value {
-  color: #374151 !important;
-  font-size: 12px !important;
-}
-
-#google_translate_element .goog-te-gadget-simple .goog-te-menu-value span:first-child {
-  color: #374151 !important;
-  font-size: 12px !important;
-}
+/* Legacy widget override cleaned */

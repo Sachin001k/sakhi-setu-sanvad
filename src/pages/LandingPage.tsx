@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Heart, Shield, Users, BookOpen, Brain, Phone, MapPin, Clock, Star, Sparkles, ArrowRight, Play } from 'lucide-react';
+import { Heart, Shield, Users, BookOpen, Brain, Phone, MapPin, Clock, Star, Sparkles, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import Background3D from '@/components/3D/Background3D';
@@ -322,7 +322,7 @@ const LandingPage = () => {
                   <Button 
                     size="lg" 
                     variant="outline"
-                    onClick={() => navigate('/auth')}
+                    onClick={() => navigate('/resources')}
                     className="text-lg px-8 py-3 border-2 transition-all duration-300"
                     style={{ borderColor: '#faa0cc', color: '#faa0cc' }}
                     onMouseEnter={(e) => {
@@ -334,8 +334,8 @@ const LandingPage = () => {
                       e.currentTarget.style.color = '#faa0cc';
                     }}
                   >
-                    <Play className="w-5 h-5 mr-2" />
-                    Watch Demo
+                    <BookOpen className="w-5 h-5 mr-2" />
+                    Try Resources
                   </Button>
                 </motion.div>
               </motion.div>

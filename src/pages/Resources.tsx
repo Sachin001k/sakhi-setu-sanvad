@@ -5,17 +5,11 @@ import { ResourceRepository } from "@/components/ResourceRepository";
 import { BookOpen, ArrowLeft } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { useEffect } from "react";
+import ResponsiveHeader from "@/components/ResponsiveHeader";
 
 const Resources = () => {
   const navigate = useNavigate();
   const { user, loading } = useAuth();
-
-  useEffect(() => {
-    if (!loading && !user) {
-      navigate('/auth');
-    }
-  }, [user, loading, navigate]);
 
   if (loading) {
     return (
@@ -25,22 +19,20 @@ const Resources = () => {
     );
   }
 
-  if (!user) {
-    return null;
-  }
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-accent/20 to-energy-light/30 pb-24">
+      {!user && <ResponsiveHeader />}
+
       <motion.header
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        className="pt-4 sm:pt-8 pb-4 sm:pb-6 px-4 sm:px-6"
+        className={`pb-4 sm:pb-6 px-4 sm:px-6 ${user ? 'pt-4 sm:pt-8' : 'pt-28 sm:pt-32'}`}
       >
         <div className="flex items-center gap-2 sm:gap-4 mb-4">
           <Button 
             variant="ghost" 
             size="icon" 
-            onClick={() => navigate("/")}
+            onClick={() => navigate(user ? "/dashboard" : "/")}
             className="hover:bg-primary/10 h-8 w-8 sm:h-10 sm:w-10"
           >
             <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -54,7 +46,9 @@ const Resources = () => {
             </motion.div>
             <div className="min-w-0 flex-1">
               <h1 className="text-xl sm:text-3xl font-bold truncate">Resource Center</h1>
-              <p className="text-sm sm:text-base text-muted-foreground mt-1">Learn and grow</p>
+              <p className="text-sm sm:text-base text-muted-foreground mt-1">
+                {user ? 'Learn and grow' : 'Browse the same wellness resources before signing in'}
+              </p>
             </div>
           </div>
         </div>
@@ -69,7 +63,7 @@ const Resources = () => {
         <ResourceRepository />
       </motion.div>
 
-      <Navigation />
+      {user && <Navigation />}
     </div>
   );
 };
