@@ -9,10 +9,11 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Play, Plus, Calendar, Share2, Search, Filter, Upload, User, Trash2, Video } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { isSafeHttpUrl, openExternal } from "@/lib/url";
 
 interface Video {
   id: string;
@@ -58,72 +59,68 @@ const VideoLibrary = () => {
     "other"
   ];
 
-  useEffect(() => {
-    // Test database connection first
-    const testConnection = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('video_library')
-          .select('count', { count: 'exact', head: true });
-        
-        if (error) {
-          console.error('Database connection test failed:', error);
-          toast.error('Database connection failed');
-        } else {
-          console.log('Database connection successful, video count:', data);
-          fetchVideos();
-        }
-      } catch (err) {
-        console.error('Database test error:', err);
-        toast.error('Failed to connect to database');
-      }
-    };
-    
-    testConnection();
-  }, []);
-
-  const fetchVideos = async () => {
+  const fetchVideos = useCallback(async () => {
     try {
-      console.log('Fetching videos...');
+      // RLS returns public videos plus the signed-in user's own private ones
       const { data, error } = await supabase
         .from('video_library')
         .select('*')
-        .eq('is_public', true)
         .order('created_at', { ascending: false });
 
-      if (error) {
-        console.error('Supabase error:', error);
-        throw error;
-      }
-      
-      console.log('Fetched videos:', data);
-      
-      // If no videos in database, show empty array
-      if (!data || data.length === 0) {
-        console.log('No videos found in database');
+      if (error) throw error;
+
+      const rows = (data || []) as Video[];
+      if (rows.length === 0) {
         setVideos([]);
         return;
       }
-      
-      // For now, use a simple approach without joins
-      const videosWithPublisher = (data || []).map((video: any) => ({
+
+      // Look up publisher names (name + avatar only) from the public_profiles view
+      const userIds = Array.from(new Set(rows.map(video => video.user_id).filter(Boolean)));
+      const names = new Map<string, string>();
+      if (userIds.length > 0) {
+        const { data: profiles, error: profilesError } = await supabase
+          .from('public_profiles')
+          .select('id, full_name')
+          .in('id', userIds);
+
+        if (profilesError) {
+          console.error('Error fetching publisher names:', profilesError);
+        } else {
+          (profiles || []).forEach((p: { id: string | null; full_name: string | null }) => {
+            if (p.id && p.full_name) names.set(p.id, p.full_name);
+          });
+        }
+      }
+
+      setVideos(rows.map(video => ({
         ...video,
-        publisher_name: 'Community Member' // Default publisher name
-      }));
-      
-      setVideos(videosWithPublisher);
+        tags: video.tags || [],
+        publisher_name: user && video.user_id === user.id
+          ? 'You'
+          : names.get(video.user_id)
+      })));
     } catch (error) {
       console.error('Error fetching videos:', error);
       toast.error('Failed to load videos');
-      // Set empty array on error to prevent infinite loading
       setVideos([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
+
+  useEffect(() => {
+    fetchVideos();
+  }, [fetchVideos]);
 
   const handleAddVideo = async () => {
     if (!user) return;
+
+    const videoUrl = newVideo.video_url.trim();
+    if (!isSafeHttpUrl(videoUrl)) {
+      toast.error('Please enter a valid link starting with http:// or https://');
+      return;
+    }
 
     try {
       const tagsArray = newVideo.tags.split(',').map(tag => tag.trim()).filter(tag => tag);
@@ -134,14 +131,14 @@ const VideoLibrary = () => {
           user_id: user.id,
           title: newVideo.title,
           description: newVideo.description,
-          video_url: newVideo.video_url,
+          video_url: videoUrl,
           category: newVideo.category,
           tags: tagsArray,
           published_date: newVideo.published_date,
           is_public: newVideo.is_public,
           views: 0,
           likes: 0
-        } as any);
+        });
 
       if (error) throw error;
 
@@ -175,7 +172,7 @@ const VideoLibrary = () => {
 
       if (error) throw error;
 
-      setVideos(videos.filter(v => v.id !== videoId));
+      setVideos(prev => prev.filter(v => v.id !== videoId));
       toast.success('Video deleted successfully!');
     } catch (error) {
       console.error('Error deleting video:', error);
@@ -184,8 +181,8 @@ const VideoLibrary = () => {
   };
 
   const filteredVideos = videos.filter(video => {
-    const matchesSearch = video.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         video.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    const matchesSearch = (video.title ?? '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         (video.description ?? '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                          video.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesCategory = selectedCategory === "all" || video.category === selectedCategory;
     return matchesSearch && matchesCategory;
@@ -370,7 +367,9 @@ const VideoLibrary = () => {
                     <Button
                       size="icon"
                       className="opacity-0 group-hover:opacity-100 transition-opacity bg-red-600 hover:bg-red-700 text-white rounded-full w-16 h-16 shadow-lg"
-                      onClick={() => window.open(video.video_url, '_blank')}
+                      onClick={() => {
+                        if (!openExternal(video.video_url)) toast.error('This video link is not valid');
+                      }}
                     >
                       <Play className="w-6 h-6 ml-1" fill="currentColor" />
                     </Button>
@@ -378,6 +377,11 @@ const VideoLibrary = () => {
                   <Badge className="absolute top-2 left-2 bg-primary/90">
                     {video.category}
                   </Badge>
+                  {!video.is_public && (
+                    <Badge variant="secondary" className="absolute top-2 right-2">
+                      Private
+                    </Badge>
+                  )}
                 </div>
                 <CardContent className="p-4">
                   <h3 className="font-semibold line-clamp-2 mb-2">{video.title}</h3>
@@ -409,7 +413,11 @@ const VideoLibrary = () => {
                         size="sm"
                         variant="ghost"
                         className="h-8 px-2"
-                        onClick={() => navigator.share?.({ title: video.title, url: video.video_url })}
+                        onClick={() => {
+                          if (isSafeHttpUrl(video.video_url)) {
+                            navigator.share?.({ title: video.title, url: video.video_url });
+                          }
+                        }}
                       >
                         <Share2 className="w-3 h-3" />
                       </Button>

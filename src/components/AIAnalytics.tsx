@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -27,25 +27,34 @@ import {
   Sparkles,
   Send,
   Bot,
-  MessageCircle
+  MessageCircle,
+  type LucideIcon
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGemini } from '@/hooks/useGemini';
 import { toast } from 'sonner';
 
+interface SymptomRecord {
+  symptom_type: string;
+  severity: number;
+  recorded_at: string;
+}
+
+interface Recommendation {
+  category: string;
+  title: string;
+  description: string;
+  priority: 'high' | 'medium' | 'low';
+  icon: LucideIcon;
+}
+
 interface AnalyticsData {
   totalSymptoms: number;
   averageSeverity: number;
   symptomTrends: { [key: string]: number };
   weeklyPattern: { day: string; severity: number }[];
-  recommendations: {
-    category: string;
-    title: string;
-    description: string;
-    priority: 'high' | 'medium' | 'low';
-    icon: any;
-  }[];
+  recommendations: Recommendation[];
   insights: {
     type: 'positive' | 'warning' | 'info';
     title: string;
@@ -54,167 +63,347 @@ interface AnalyticsData {
   }[];
 }
 
+interface SymptomSummary {
+  symptom: string;
+  count: number;
+  averageSeverity: number;
+}
+
+// AI recommendations are cached for the browser session (per user + data snapshot)
+// so revisiting the tab does not trigger another Gemini call.
+const aiRecommendationCache = new Map<string, Recommendation[]>();
+
+const MAX_SYMPTOM_TYPES_FOR_AI = 8;
+
+const formatSymptomName = (symptomType: string) => symptomType.replace(/_/g, ' ');
+
+const summarizeSymptoms = (symptoms: SymptomRecord[]): SymptomSummary[] => {
+  const grouped: Record<string, { count: number; total: number }> = {};
+  symptoms.forEach((s) => {
+    const entry = grouped[s.symptom_type] ?? { count: 0, total: 0 };
+    entry.count += 1;
+    entry.total += s.severity;
+    grouped[s.symptom_type] = entry;
+  });
+  return Object.entries(grouped)
+    .map(([symptom, { count, total }]) => ({
+      symptom,
+      count,
+      averageSeverity: Math.round((total / count) * 10) / 10
+    }))
+    .sort((a, b) => b.count - a.count || b.averageSeverity - a.averageSeverity);
+};
+
+const generateStaticRecommendations = (symptoms: SymptomRecord[], avgSeverity: number): Recommendation[] => {
+  const recommendations: Recommendation[] = [];
+
+  // Hot flashes recommendations
+  const hotFlashes = symptoms.filter(s => s.symptom_type === 'hot_flashes');
+  if (hotFlashes.length > 0) {
+    recommendations.push({
+      category: 'Hot Flashes',
+      title: 'Cooling Strategies',
+      description: 'Try wearing layers, using a fan, and avoiding spicy foods during hot flash episodes.',
+      priority: 'high' as const,
+      icon: Thermometer
+    });
+  }
+
+  // Sleep recommendations
+  const sleepIssues = symptoms.filter(s => s.symptom_type === 'sleep_issues');
+  if (sleepIssues.length > 0) {
+    recommendations.push({
+      category: 'Sleep',
+      title: 'Sleep Hygiene',
+      description: 'Maintain a consistent sleep schedule and create a cool, dark bedroom environment.',
+      priority: 'high' as const,
+      icon: Moon
+    });
+  }
+
+  // Mood recommendations
+  const moodIssues = symptoms.filter(s => ['mood_swings', 'anxiety', 'depression'].includes(s.symptom_type));
+  if (moodIssues.length > 0) {
+    recommendations.push({
+      category: 'Mood',
+      title: 'Stress Management',
+      description: 'Practice deep breathing, meditation, or gentle yoga to help manage mood changes.',
+      priority: 'medium' as const,
+      icon: Heart
+    });
+  }
+
+  // General recommendations based on severity
+  if (avgSeverity > 6) {
+    recommendations.push({
+      category: 'General',
+      title: 'Professional Support',
+      description: 'Consider consulting with a healthcare provider about your symptoms.',
+      priority: 'high' as const,
+      icon: Target
+    });
+  }
+
+  if (recommendations.length === 0) {
+    recommendations.push({
+      category: 'General',
+      title: 'Start Tracking',
+      description: 'Log your symptoms to unlock the full AI analytics experience.',
+      priority: 'low' as const,
+      icon: Lightbulb
+    });
+  }
+
+  return recommendations.slice(0, 4);
+};
+
+const generateInsights = (symptoms: SymptomRecord[], avgSeverity: number, trends: { [key: string]: number }) => {
+  const insights: AnalyticsData['insights'] = [];
+
+  if (symptoms.length === 0) {
+    insights.push({
+      type: 'info' as const,
+      title: 'Start Tracking',
+      description: 'Begin logging your symptoms to get personalized insights and recommendations.',
+      action: 'Track your first symptom'
+    });
+    return insights;
+  }
+
+  // Severity insights
+  if (avgSeverity > 7) {
+    insights.push({
+      type: 'warning' as const,
+      title: 'High Symptom Severity',
+      description: 'Your symptoms are quite severe. Consider seeking professional medical advice.',
+      action: 'Find nearby PHC'
+    });
+  } else if (avgSeverity < 4) {
+    insights.push({
+      type: 'positive' as const,
+      title: 'Well-Managed Symptoms',
+      description: 'Great job! Your symptoms appear to be well-managed. Keep up the good work.',
+      action: 'Continue tracking'
+    });
+  }
+
+  // Pattern insights
+  const mostCommonSymptom = Object.entries(trends).sort(([,a], [,b]) => b - a)[0];
+  if (mostCommonSymptom) {
+    insights.push({
+      type: 'info' as const,
+      title: 'Most Common Symptom',
+      description: `You experience ${mostCommonSymptom[0].replace('_', ' ')} most frequently. Focus on managing this symptom.`,
+      action: 'View recommendations'
+    });
+  }
+
+  // Trend insights
+  const recentSymptoms = symptoms.slice(0, 7);
+  const olderSymptoms = symptoms.slice(7, 14);
+  if (recentSymptoms.length > 0 && olderSymptoms.length > 0) {
+    const recentAvg = recentSymptoms.reduce((sum, s) => sum + s.severity, 0) / recentSymptoms.length;
+    const olderAvg = olderSymptoms.reduce((sum, s) => sum + s.severity, 0) / olderSymptoms.length;
+    
+    if (recentAvg > olderAvg * 1.2) {
+      insights.push({
+        type: 'warning' as const,
+        title: 'Symptoms Worsening',
+        description: 'Your symptoms have increased in severity recently. Consider adjusting your management strategies.',
+        action: 'Review recommendations'
+      });
+    } else if (recentAvg < olderAvg * 0.8) {
+      insights.push({
+        type: 'positive' as const,
+        title: 'Symptoms Improving',
+        description: 'Your symptoms have decreased in severity recently. Your management strategies are working!',
+        action: 'Keep tracking'
+      });
+    }
+  }
+
+  return insights.slice(0, 3);
+};
+
+const processAnalyticsData = (symptoms: SymptomRecord[]): AnalyticsData => {
+  const totalSymptoms = symptoms.length;
+  const averageSeverity = symptoms.length > 0
+    ? symptoms.reduce((sum, s) => sum + s.severity, 0) / symptoms.length
+    : 0;
+
+  // Calculate symptom trends
+  const symptomTrends: { [key: string]: number } = {};
+  symptoms.forEach(s => {
+    symptomTrends[s.symptom_type] = (symptomTrends[s.symptom_type] || 0) + 1;
+  });
+
+  // Calculate weekly patterns
+  const weeklyPattern = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    .map(day => {
+      const daySymptoms = symptoms.filter(s => {
+        const date = new Date(s.recorded_at);
+        return date.toLocaleDateString('en-US', { weekday: 'long' }) === day;
+      });
+      const avgSeverity = daySymptoms.length > 0
+        ? daySymptoms.reduce((sum, s) => sum + s.severity, 0) / daySymptoms.length
+        : 0;
+      return { day, severity: avgSeverity };
+    });
+
+  return {
+    totalSymptoms,
+    averageSeverity: Math.round(averageSeverity * 10) / 10,
+    symptomTrends,
+    weeklyPattern,
+    recommendations: generateStaticRecommendations(symptoms, averageSeverity),
+    insights: generateInsights(symptoms, averageSeverity, symptomTrends)
+  };
+};
+
 export const AIAnalytics: React.FC = () => {
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
+  const [symptomSummary, setSymptomSummary] = useState<SymptomSummary[]>([]);
+  const [cacheKey, setCacheKey] = useState<string | null>(null);
+  const [aiRecommendations, setAiRecommendations] = useState<Recommendation[] | null>(null);
+  const [aiRecommendationsError, setAiRecommendationsError] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [aiQuery, setAiQuery] = useState('');
   const [aiResponse, setAiResponse] = useState('');
-  const [showAiChat, setShowAiChat] = useState(false);
+  const [userAge, setUserAge] = useState<number | null>(null);
   const { user } = useAuth();
-  
-  const { 
-    isLoading: aiLoading, 
-    generateWellnessAdvice, 
-    analyzeSymptoms,
-    generateHealthReport 
+
+  const {
+    isLoading: aiLoading,
+    generateWellnessAdvice,
+    analyzeSymptoms
   } = useGemini({
     suppressToasts: true
   });
 
-  useEffect(() => {
-    if (user) {
-      fetchAnalytics();
-    }
-  }, [user]);
-
-  const fetchAnalytics = async () => {
+  const fetchAnalytics = useCallback(async () => {
     if (!user) return;
 
     try {
       setLoading(true);
-      
-      // Fetch symptoms data
-      const { data: symptoms, error: symptomsError } = await supabase
+      setLoadError(null);
+
+      const { data, error: symptomsError } = await supabase
         .from('symptoms')
-        .select('*')
+        .select('symptom_type, severity, recorded_at')
         .eq('user_id', user.id)
         .order('recorded_at', { ascending: false })
         .limit(100);
 
       if (symptomsError) throw symptomsError;
 
-      // Process analytics data
-      const analyticsData = await processAnalyticsData(symptoms || []);
-      setAnalytics(analyticsData);
+      const symptoms: SymptomRecord[] = data ?? [];
+      const key = `${user.id}:${symptoms.length}:${symptoms[0]?.recorded_at ?? 'none'}`;
+
+      setAnalytics(processAnalyticsData(symptoms));
+      setSymptomSummary(summarizeSymptoms(symptoms));
+      setCacheKey(key);
+      setAiRecommendations(aiRecommendationCache.get(key) ?? null);
+      setAiRecommendationsError(false);
     } catch (error) {
-      const fallbackAnalytics = await processAnalyticsData([]);
-      setAnalytics(fallbackAnalytics);
+      console.error('Error fetching analytics:', error);
+      setAnalytics(null);
+      setLoadError('We could not load your symptom data. Please check your connection and try again.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
-  const processAnalyticsData = async (symptoms: any[]): Promise<AnalyticsData> => {
-    const totalSymptoms = symptoms.length;
-    const averageSeverity = symptoms.length > 0 
-      ? symptoms.reduce((sum, s) => sum + s.severity, 0) / symptoms.length 
-      : 0;
+  useEffect(() => {
+    fetchAnalytics();
+  }, [fetchAnalytics]);
 
-    // Calculate symptom trends
-    const symptomTrends: { [key: string]: number } = {};
-    symptoms.forEach(s => {
-      symptomTrends[s.symptom_type] = (symptomTrends[s.symptom_type] || 0) + 1;
-    });
+  useEffect(() => {
+    if (!user) return;
 
-    // Calculate weekly patterns
-    const weeklyPattern = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-      .map(day => {
-        const daySymptoms = symptoms.filter(s => {
-          const date = new Date(s.recorded_at);
-          return date.toLocaleDateString('en-US', { weekday: 'long' }) === day;
-        });
-        const avgSeverity = daySymptoms.length > 0 
-          ? daySymptoms.reduce((sum, s) => sum + s.severity, 0) / daySymptoms.length 
-          : 0;
-        return { day, severity: avgSeverity };
+    let cancelled = false;
+    supabase
+      .from('users')
+      .select('age')
+      .eq('id', user.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.error('Error loading user age:', error);
+          return;
+        }
+        setUserAge(typeof data?.age === 'number' ? data.age : null);
       });
 
-    // Generate AI recommendations
-    const recommendations = await generateRecommendations(symptoms, averageSeverity);
-    
-    // Generate insights
-    const insights = generateInsights(symptoms, averageSeverity, symptomTrends);
-
-    return {
-      totalSymptoms,
-      averageSeverity: Math.round(averageSeverity * 10) / 10,
-      symptomTrends,
-      weeklyPattern,
-      recommendations,
-      insights
+    return () => {
+      cancelled = true;
     };
-  };
+  }, [user]);
 
-  const generateRecommendations = async (symptoms: any[], avgSeverity: number) => {
-    const recommendations = [];
+  const ageContext = userAge !== null ? { age: userAge } : {};
 
-    // Get AI-powered recommendations based on actual symptoms (not trend)
+  // Only called on explicit user action; sends an aggregated summary, not raw records.
+  const generateAiRecommendations = async () => {
+    if (!analytics || !cacheKey || symptomSummary.length === 0) return;
+
+    const cached = aiRecommendationCache.get(cacheKey);
+    if (cached) {
+      setAiRecommendations(cached);
+      return;
+    }
+
+    setAiRecommendationsError(false);
+
     try {
-      if (symptoms.length === 0) {
-        return generateStaticRecommendations(symptoms, avgSeverity);
-      }
-      
-      // Create detailed symptom list with severity for AI analysis - BASED ONLY ON SYMPTOMS AND SEVERITY
-      const symptomDetails = symptoms.map(s => {
-        const symptomName = s.symptom_type.replace('_', ' ');
-        return `${symptomName} with severity ${s.severity}/10`;
-      }).join(', ');
-      
-      const symptomTypes = symptoms.map(s => s.symptom_type);
-      const highSeveritySymptoms = symptoms.filter(s => s.severity >= 7);
-      const mediumSeveritySymptoms = symptoms.filter(s => s.severity >= 4 && s.severity < 7);
-      const lowSeveritySymptoms = symptoms.filter(s => s.severity < 4);
-      
-      // Build prompt focusing ONLY on symptoms and their severity, NOT trends
-      const aiPrompt = `You are a menopause health advisor. Based ONLY on the following logged symptoms and their severity levels:
+      const topSymptoms = symptomSummary.slice(0, MAX_SYMPTOM_TYPES_FOR_AI);
+      const symptomDetails = topSymptoms
+        .map((s) => `- ${formatSymptomName(s.symptom)}: logged ${s.count} time(s), average severity ${s.averageSeverity}/10`)
+        .join('\n');
 
-SYMPTOMS AND SEVERITY:
+      const aiPrompt = `You are a menopause health advisor. Based ONLY on the following summary of logged symptoms and their severity levels:
+
+SYMPTOM SUMMARY:
 ${symptomDetails}
 
-SYMPTOM BREAKDOWN:
-- Total symptoms logged: ${symptoms.length}
-- Average severity: ${avgSeverity.toFixed(1)}/10
-- High severity symptoms (7-10): ${highSeveritySymptoms.length > 0 ? highSeveritySymptoms.map(s => `${s.symptom_type.replace('_', ' ')} (${s.severity}/10)`).join(', ') : 'None'}
-- Medium severity symptoms (4-6): ${mediumSeveritySymptoms.length > 0 ? mediumSeveritySymptoms.map(s => `${s.symptom_type.replace('_', ' ')} (${s.severity}/10)`).join(', ') : 'None'}
-- Low severity symptoms (1-3): ${lowSeveritySymptoms.length > 0 ? lowSeveritySymptoms.map(s => `${s.symptom_type.replace('_', ' ')} (${s.severity}/10)`).join(', ') : 'None'}
+- Total entries considered: ${analytics.totalSymptoms}
+- Overall average severity: ${analytics.averageSeverity}/10
 
-IMPORTANT: Provide recommendations based ONLY on the symptoms and their severity levels listed above. Do NOT consider trends, patterns, or changes over time. Focus on managing the specific symptoms at their current severity levels.`;
-      
-      const aiAdvice = await generateWellnessAdvice(
-        aiPrompt,
-        {
-          age: 45, // You can make this dynamic
-          symptoms: symptomTypes,
-          concerns: ['symptom management', 'quality of life', 'menopause support']
-        }
-      );
+Provide up to 4 short, practical recommendations (one per line) for managing these specific symptoms at their current severity levels.`;
 
-      // Parse AI response and create recommendations
+      const aiAdvice = await generateWellnessAdvice(aiPrompt, {
+        ...ageContext,
+        symptoms: topSymptoms.map((s) => s.symptom),
+        concerns: ['symptom management', 'quality of life', 'menopause support']
+      });
+
+      const recommendations: Recommendation[] = [];
       const aiLines = aiAdvice.split('\n').filter(line => line.trim());
       aiLines.slice(0, 4).forEach((line, index) => {
-        if (line.includes('hot') || line.includes('flash')) {
+        const lower = line.toLowerCase();
+        if (lower.includes('hot') || lower.includes('flash')) {
           recommendations.push({
             category: 'Hot Flashes',
             title: 'AI-Recommended Cooling',
             description: line.trim(),
-            priority: 'high' as const,
+            priority: 'high',
             icon: Thermometer
           });
-        } else if (line.includes('sleep') || line.includes('insomnia')) {
+        } else if (lower.includes('sleep') || lower.includes('insomnia')) {
           recommendations.push({
             category: 'Sleep',
             title: 'AI Sleep Strategy',
             description: line.trim(),
-            priority: 'high' as const,
+            priority: 'high',
             icon: Moon
           });
-        } else if (line.includes('mood') || line.includes('anxiety') || line.includes('stress')) {
+        } else if (lower.includes('mood') || lower.includes('anxiety') || lower.includes('stress')) {
           recommendations.push({
             category: 'Mood',
             title: 'AI Mood Support',
             description: line.trim(),
-            priority: 'medium' as const,
+            priority: 'medium',
             icon: Heart
           });
         } else {
@@ -222,147 +411,19 @@ IMPORTANT: Provide recommendations based ONLY on the symptoms and their severity
             category: 'General',
             title: `AI Recommendation ${index + 1}`,
             description: line.trim(),
-            priority: 'medium' as const,
+            priority: 'medium',
             icon: Brain
           });
         }
       });
+
+      aiRecommendationCache.set(cacheKey, recommendations);
+      setAiRecommendations(recommendations);
     } catch (error) {
-      return generateStaticRecommendations(symptoms, avgSeverity);
+      console.error('Error generating AI recommendations:', error);
+      setAiRecommendationsError(true);
+      toast.error('Could not generate AI recommendations. Showing general suggestions instead.');
     }
-
-    return recommendations.slice(0, 4);
-  };
-
-  const generateStaticRecommendations = (symptoms: any[], avgSeverity: number) => {
-    const recommendations = [];
-
-    // Hot flashes recommendations
-    const hotFlashes = symptoms.filter(s => s.symptom_type === 'hot_flashes');
-    if (hotFlashes.length > 0) {
-      recommendations.push({
-        category: 'Hot Flashes',
-        title: 'Cooling Strategies',
-        description: 'Try wearing layers, using a fan, and avoiding spicy foods during hot flash episodes.',
-        priority: 'high' as const,
-        icon: Thermometer
-      });
-    }
-
-    // Sleep recommendations
-    const sleepIssues = symptoms.filter(s => s.symptom_type === 'sleep_issues');
-    if (sleepIssues.length > 0) {
-      recommendations.push({
-        category: 'Sleep',
-        title: 'Sleep Hygiene',
-        description: 'Maintain a consistent sleep schedule and create a cool, dark bedroom environment.',
-        priority: 'high' as const,
-        icon: Moon
-      });
-    }
-
-    // Mood recommendations
-    const moodIssues = symptoms.filter(s => ['mood_swings', 'anxiety', 'depression'].includes(s.symptom_type));
-    if (moodIssues.length > 0) {
-      recommendations.push({
-        category: 'Mood',
-        title: 'Stress Management',
-        description: 'Practice deep breathing, meditation, or gentle yoga to help manage mood changes.',
-        priority: 'medium' as const,
-        icon: Heart
-      });
-    }
-
-    // General recommendations based on severity
-    if (avgSeverity > 6) {
-      recommendations.push({
-        category: 'General',
-        title: 'Professional Support',
-        description: 'Consider consulting with a healthcare provider about your symptoms.',
-        priority: 'high' as const,
-        icon: Target
-      });
-    }
-
-    if (recommendations.length === 0) {
-      recommendations.push({
-        category: 'General',
-        title: 'Start Tracking',
-        description: 'Log your symptoms to unlock the full AI analytics experience.',
-        priority: 'low' as const,
-        icon: Lightbulb
-      });
-    }
-
-    return recommendations.slice(0, 4);
-  };
-
-  const generateInsights = (symptoms: any[], avgSeverity: number, trends: { [key: string]: number }) => {
-    const insights = [];
-
-    if (symptoms.length === 0) {
-      insights.push({
-        type: 'info' as const,
-        title: 'Start Tracking',
-        description: 'Begin logging your symptoms to get personalized insights and recommendations.',
-        action: 'Track your first symptom'
-      });
-      return insights;
-    }
-
-    // Severity insights
-    if (avgSeverity > 7) {
-      insights.push({
-        type: 'warning' as const,
-        title: 'High Symptom Severity',
-        description: 'Your symptoms are quite severe. Consider seeking professional medical advice.',
-        action: 'Find nearby PHC'
-      });
-    } else if (avgSeverity < 4) {
-      insights.push({
-        type: 'positive' as const,
-        title: 'Well-Managed Symptoms',
-        description: 'Great job! Your symptoms appear to be well-managed. Keep up the good work.',
-        action: 'Continue tracking'
-      });
-    }
-
-    // Pattern insights
-    const mostCommonSymptom = Object.entries(trends).sort(([,a], [,b]) => b - a)[0];
-    if (mostCommonSymptom) {
-      insights.push({
-        type: 'info' as const,
-        title: 'Most Common Symptom',
-        description: `You experience ${mostCommonSymptom[0].replace('_', ' ')} most frequently. Focus on managing this symptom.`,
-        action: 'View recommendations'
-      });
-    }
-
-    // Trend insights
-    const recentSymptoms = symptoms.slice(0, 7);
-    const olderSymptoms = symptoms.slice(7, 14);
-    if (recentSymptoms.length > 0 && olderSymptoms.length > 0) {
-      const recentAvg = recentSymptoms.reduce((sum, s) => sum + s.severity, 0) / recentSymptoms.length;
-      const olderAvg = olderSymptoms.reduce((sum, s) => sum + s.severity, 0) / olderSymptoms.length;
-      
-      if (recentAvg > olderAvg * 1.2) {
-        insights.push({
-          type: 'warning' as const,
-          title: 'Symptoms Worsening',
-          description: 'Your symptoms have increased in severity recently. Consider adjusting your management strategies.',
-          action: 'Review recommendations'
-        });
-      } else if (recentAvg < olderAvg * 0.8) {
-        insights.push({
-          type: 'positive' as const,
-          title: 'Symptoms Improving',
-          description: 'Your symptoms have decreased in severity recently. Your management strategies are working!',
-          action: 'Keep tracking'
-        });
-      }
-    }
-
-    return insights.slice(0, 3);
   };
 
   const getPriorityColor = (priority: string) => {
@@ -395,33 +456,25 @@ IMPORTANT: Provide recommendations based ONLY on the symptoms and their severity
   const handleAiQuery = async () => {
     if (!aiQuery.trim()) return;
 
+    if (!analytics) {
+      toast.error('Please wait for analytics to load');
+      return;
+    }
+
     try {
-      // Build context based ONLY on symptoms and severity, not trends
-      if (!analytics) {
-        toast.error('Please wait for analytics to load');
-        return;
-      }
-
-      // Fetch actual symptoms with severity for context
-      const { data: symptoms } = await supabase
-        .from('symptoms')
-        .select('symptom_type, severity')
-        .eq('user_id', user?.id)
-        .order('recorded_at', { ascending: false })
-        .limit(20);
-
-      const symptomContext = symptoms && symptoms.length > 0
-        ? `Current logged symptoms: ${symptoms.map(s => `${s.symptom_type.replace('_', ' ')} (severity: ${s.severity}/10)`).join(', ')}. Average severity: ${analytics.averageSeverity}/10.`
+      const topSymptoms = symptomSummary.slice(0, MAX_SYMPTOM_TYPES_FOR_AI);
+      const symptomContext = topSymptoms.length > 0
+        ? `Current logged symptoms: ${topSymptoms.map(s => `${formatSymptomName(s.symptom)} (average severity: ${s.averageSeverity}/10)`).join(', ')}. Average severity: ${analytics.averageSeverity}/10.`
         : 'No symptoms logged yet.';
-      
+
       const enhancedQuery = `${aiQuery}\n\nContext: ${symptomContext} Please provide recommendations based ONLY on the symptoms and their severity levels, not on trends or patterns over time.`;
-      
+
       const response = await generateWellnessAdvice(enhancedQuery, {
-        age: 45,
-        symptoms: analytics?.symptomTrends ? Object.keys(analytics.symptomTrends) : [],
+        ...ageContext,
+        symptoms: topSymptoms.map(s => s.symptom),
         concerns: ['symptom management', 'wellness optimization']
       });
-      
+
       // Format response by removing markdown formatting
       const formattedResponse = response
         .replace(/\*\*(.*?)\*\*/g, '$1') // Remove bold formatting
@@ -429,21 +482,22 @@ IMPORTANT: Provide recommendations based ONLY on the symptoms and their severity
         .replace(/#{1,6}\s*/g, '') // Remove headers
         .replace(/\n{3,}/g, '\n\n') // Reduce multiple line breaks
         .trim();
-      
+
       setAiResponse(formattedResponse);
-      
+
       // Auto-scroll to AI response after a short delay
       setTimeout(() => {
         const aiResponseElement = document.querySelector('[data-ai-response]');
         if (aiResponseElement) {
-          aiResponseElement.scrollIntoView({ 
-            behavior: 'smooth', 
-            block: 'start' 
+          aiResponseElement.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start'
           });
         }
       }, 300);
     } catch (error) {
-      // Intentionally silenced to avoid UI noise.
+      console.error('Error answering AI query:', error);
+      toast.error('The AI assistant is unavailable right now. Please try again later.');
     }
   };
 
@@ -451,14 +505,18 @@ IMPORTANT: Provide recommendations based ONLY on the symptoms and their severity
     if (!analytics) return;
 
     try {
-      const symptoms = Object.keys(analytics.symptomTrends);
+      const symptoms = symptomSummary.slice(0, MAX_SYMPTOM_TYPES_FOR_AI).map(s => s.symptom);
       const response = await analyzeSymptoms(symptoms, `Average severity: ${analytics.averageSeverity}/10`);
       setAiResponse(response);
-      setShowAiChat(true);
     } catch (error) {
-      // Suppressed to keep the tab experience consistent.
+      console.error('Error analyzing symptoms:', error);
+      toast.error('Could not analyze symptoms right now. Please try again later.');
     }
   };
+
+  const displayedRecommendations = aiRecommendations && aiRecommendations.length > 0
+    ? aiRecommendations
+    : analytics?.recommendations ?? [];
 
   if (loading) {
     return (
@@ -471,6 +529,20 @@ IMPORTANT: Provide recommendations based ONLY on the symptoms and their severity
           <Loader2 className="w-8 h-8 animate-spin text-neon-pink" />
           <p className="text-gray-600">Analyzing your data...</p>
         </motion.div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="text-center p-8">
+        <AlertCircle className="w-16 h-16 mx-auto mb-4 text-red-400" />
+        <h3 className="text-lg font-semibold mb-2">Couldn't Load Analytics</h3>
+        <p className="text-gray-600 mb-4">{loadError}</p>
+        <Button onClick={fetchAnalytics}>
+          <RefreshCw className="w-4 h-4 mr-2" />
+          Try Again
+        </Button>
       </div>
     );
   }
@@ -566,8 +638,8 @@ IMPORTANT: Provide recommendations based ONLY on the symptoms and their severity
             <div className="flex items-center justify-center mb-3">
               <Sparkles className="w-8 h-8 text-neon-purple" />
             </div>
-            <div className="text-3xl font-bold text-neon-purple mb-1">{analytics.recommendations.length}</div>
-            <div className="text-sm text-gray-600">AI Recommendations</div>
+            <div className="text-3xl font-bold text-neon-purple mb-1">{displayedRecommendations.length}</div>
+            <div className="text-sm text-gray-600">{aiRecommendations ? 'AI Recommendations' : 'Recommendations'}</div>
           </CardContent>
         </Card>
       </motion.div>
@@ -631,18 +703,39 @@ IMPORTANT: Provide recommendations based ONLY on the symptoms and their severity
       >
         <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-xl">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Target className="w-5 h-5 text-neon-pink" />
-              Personalized Recommendations
-            </CardTitle>
-            <CardDescription>
-              AI-generated suggestions to help manage your symptoms
-            </CardDescription>
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Target className="w-5 h-5 text-neon-pink" />
+                  Personalized Recommendations
+                </CardTitle>
+                <CardDescription>
+                  {aiRecommendations
+                    ? 'AI-generated suggestions based on a summary of your logged symptoms'
+                    : 'Suggestions based on the symptoms you have logged'}
+                </CardDescription>
+              </div>
+              {analytics.totalSymptoms > 0 && !aiRecommendations && (
+                <Button
+                  onClick={generateAiRecommendations}
+                  disabled={aiLoading}
+                  size="sm"
+                  variant="outline"
+                >
+                  {aiLoading ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-4 h-4 mr-2" />
+                  )}
+                  {aiRecommendationsError ? 'Retry AI Recommendations' : 'Get AI Recommendations'}
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <AnimatePresence>
-                {analytics.recommendations.map((rec, index) => {
+                {displayedRecommendations.map((rec, index) => {
                   const Icon = rec.icon;
                   return (
                     <motion.div

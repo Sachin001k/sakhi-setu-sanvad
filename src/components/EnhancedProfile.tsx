@@ -31,42 +31,66 @@ import {
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { getAvatarUrl } from "@/lib/storage";
+import { uploadAvatar } from "@/lib/storage";
+import { isSafeHttpUrl, openExternal } from "@/lib/url";
 import AvatarUpload from "@/components/AvatarUpload";
 import { toast } from "sonner";
 import RecentActivity from './RecentActivity';
 
+type SocialLinks = Record<string, string>;
+
 interface UserProfile {
-  id: string;
-  user_id: string;
-  full_name?: string;
+  id?: string;
+  user_id?: string;
+  full_name?: string | null;
   bio: string | null;
   location: string | null;
   website: string | null;
-  social_links: any;
-  interests: string[];
-  privacy_settings: any;
+  social_links: SocialLinks | null;
+  interests: string[] | null;
   avatar_url: string | null;
-  created_at: string;
-  updated_at: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+interface UserVideo {
+  id: string;
+  title: string;
+  description: string | null;
+  video_url: string;
+  category: string;
+  tags: string[] | null;
+  published_date: string | null;
+  created_at: string | null;
 }
 
 interface EnhancedProfileProps {
-  userProfile?: any;
+  userProfile?: UserProfile | null;
   onProfileUpdate?: () => void;
 }
+
+const EMPTY_SOCIAL_LINKS: SocialLinks = {
+  instagram: "",
+  twitter: "",
+  linkedin: "",
+  facebook: ""
+};
+
+// social_links is a JSON column; keep only string values
+const toSocialLinks = (value: unknown): SocialLinks => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...EMPTY_SOCIAL_LINKS };
+  const links: SocialLinks = { ...EMPTY_SOCIAL_LINKS };
+  for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof val === 'string') links[key] = val;
+  }
+  return links;
+};
 
 // UserVideos component to show only current user's videos
 const UserVideos = ({ onVideoCountChange }: { onVideoCountChange?: (count: number) => void }) => {
   const { user } = useAuth();
-  const [videos, setVideos] = useState<any[]>([]);
+  const [videos, setVideos] = useState<UserVideo[]>([]);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (user) {
-      fetchUserVideos();
-    }
-  }, [user]);
 
   useEffect(() => {
     if (onVideoCountChange) {
@@ -74,7 +98,7 @@ const UserVideos = ({ onVideoCountChange }: { onVideoCountChange?: (count: numbe
     }
   }, [videos.length, onVideoCountChange]);
 
-  const fetchUserVideos = async () => {
+  const fetchUserVideos = useCallback(async () => {
     if (!user) return;
 
     try {
@@ -93,7 +117,13 @@ const UserVideos = ({ onVideoCountChange }: { onVideoCountChange?: (count: numbe
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
+
+  useEffect(() => {
+    if (user) {
+      fetchUserVideos();
+    }
+  }, [user, fetchUserVideos]);
 
   if (loading) {
     return (
@@ -186,7 +216,9 @@ const UserVideos = ({ onVideoCountChange }: { onVideoCountChange?: (count: numbe
                         <Button
                           size="icon"
                           className="opacity-0 group-hover:opacity-100 transition-opacity bg-red-600 hover:bg-red-700 text-white rounded-full w-16 h-16 shadow-lg"
-                          onClick={() => window.open(video.video_url, '_blank')}
+                          onClick={() => {
+                            if (!openExternal(video.video_url)) toast.error('This video link is not valid');
+                          }}
                         >
                           <Play className="w-6 h-6 ml-1" fill="currentColor" />
                         </Button>
@@ -201,7 +233,7 @@ const UserVideos = ({ onVideoCountChange }: { onVideoCountChange?: (count: numbe
                         {video.description}
                       </p>
                       <div className="flex flex-wrap gap-1 mb-3">
-                        {video.tags && video.tags.slice(0, 3).map((tag, index) => (
+                        {(video.tags || []).slice(0, 3).map((tag, index) => (
                           <Badge key={index} variant="secondary" className="text-xs">
                             {tag}
                           </Badge>
@@ -209,13 +241,13 @@ const UserVideos = ({ onVideoCountChange }: { onVideoCountChange?: (count: numbe
                       </div>
                       <div className="flex items-center gap-1 text-xs text-gray-500 mb-3">
                         <User className="h-3 w-3" />
-                        <span>Published by {video.publisher_name || 'You'}</span>
+                        <span>Published by you</span>
                       </div>
                       <div className="flex items-center justify-between text-sm text-muted-foreground">
                         <div className="flex items-center gap-4">
                           <div className="flex items-center gap-1">
                             <Calendar className="w-3 h-3" />
-                            {new Date(video.published_date || video.created_at).toLocaleDateString()}
+                            {new Date(video.published_date || video.created_at || '').toLocaleDateString()}
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -223,7 +255,11 @@ const UserVideos = ({ onVideoCountChange }: { onVideoCountChange?: (count: numbe
                             size="sm"
                             variant="ghost"
                             className="h-8 px-2"
-                            onClick={() => navigator.share?.({ title: video.title, url: video.video_url })}
+                            onClick={() => {
+                              if (isSafeHttpUrl(video.video_url)) {
+                                navigator.share?.({ title: video.title, url: video.video_url });
+                              }
+                            }}
                           >
                             <Link className="w-3 h-3" />
                           </Button>
@@ -256,12 +292,7 @@ const EnhancedProfile = ({ userProfile: propUserProfile, onProfileUpdate }: Enha
     location: "",
     website: "",
     interests: [] as string[],
-    social_links: {
-      instagram: "",
-      twitter: "",
-      linkedin: "",
-      facebook: ""
-    }
+    social_links: { ...EMPTY_SOCIAL_LINKS }
   });
   const [newInterest, setNewInterest] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -276,33 +307,7 @@ const EnhancedProfile = ({ userProfile: propUserProfile, onProfileUpdate }: Enha
     setStats(prev => ({ ...prev, videos: count }));
   }, []);
 
-  useEffect(() => {
-    if (propUserProfile) {
-      // Use prop data if available
-      setProfile(propUserProfile);
-      setEditForm({
-        bio: propUserProfile.bio || "",
-        location: propUserProfile.location || "",
-        website: propUserProfile.website || "",
-        interests: propUserProfile.interests || [],
-        social_links: propUserProfile.social_links || {
-          instagram: "",
-          twitter: "",
-          linkedin: "",
-          facebook: ""
-        }
-      });
-      setLoading(false);
-    } else {
-    fetchProfile();
-    }
-    
-    if (user) {
-      fetchStats();
-    }
-  }, [user, propUserProfile]);
-
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     if (!user) return;
 
     try {
@@ -318,31 +323,11 @@ const EnhancedProfile = ({ userProfile: propUserProfile, onProfileUpdate }: Enha
         .select('*', { count: 'exact', head: true })
         .eq('user_id', user.id);
 
-      // Also fetch actual videos to debug
-      const { data: videosData, error: videosDataError } = await supabase
-        .from('video_library')
-        .select('id, title, user_id')
-        .eq('user_id', user.id);
+      if (postsError) console.error('Error fetching posts count:', postsError);
+      if (videosError) console.error('Error fetching videos count:', videosError);
 
-      // Debug logging
-      console.log('Stats query results:', { 
-        postsCount, 
-        postsError, 
-        videosCount, 
-        videosError, 
-        videosData,
-        videosDataError,
-        userId: user.id 
-      });
-
-      // Ensure we have valid counts
-      const finalPostsCount = postsCount !== null ? postsCount : 0;
-      const finalVideosCount = videosCount !== null ? videosCount : (videosData ? videosData.length : 0);
-      
-      console.log('Final stats:', {
-        posts: finalPostsCount,
-        videos: finalVideosCount
-      });
+      const finalPostsCount = postsCount ?? 0;
+      const finalVideosCount = videosCount ?? 0;
 
       setStats({
         posts: finalPostsCount,
@@ -351,9 +336,35 @@ const EnhancedProfile = ({ userProfile: propUserProfile, onProfileUpdate }: Enha
     } catch (error) {
       console.error('Error fetching stats:', error);
     }
-  };
+  }, [user]);
 
-  const fetchProfile = async () => {
+  const createProfile = useCallback(async () => {
+    if (!user) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('user_profiles')
+        .insert({
+          user_id: user.id,
+          bio: "",
+          location: "",
+          website: "",
+          interests: [],
+          social_links: {},
+          privacy_settings: {},
+          avatar_url: null
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      setProfile({ ...data, social_links: toSocialLinks(data.social_links) });
+    } catch (error) {
+      console.error('Error creating profile:', error);
+    }
+  }, [user]);
+
+  const fetchProfile = useCallback(async () => {
     if (!user) return;
 
     try {
@@ -368,7 +379,7 @@ const EnhancedProfile = ({ userProfile: propUserProfile, onProfileUpdate }: Enha
         .from('user_profiles')
         .select('*')
         .eq('user_id', user.id)
-          .single()
+          .maybeSingle()
       ]);
 
       const userData = usersResult.data;
@@ -376,31 +387,28 @@ const EnhancedProfile = ({ userProfile: propUserProfile, onProfileUpdate }: Enha
 
       if (userData) {
         // Merge data from both tables
-        const mergedProfile = {
-          ...(profileData as any),
-          full_name: (userData as any).full_name,
-          avatar_url: (userData as any).avatar_url || (profileData as any)?.avatar_url,
-          location: (userData as any).location || (profileData as any)?.location,
-          age: (userData as any).age,
-          phone: (userData as any).phone,
-          emergency_contact: (userData as any).emergency_contact,
-          medical_conditions: (userData as any).medical_conditions,
-          current_medications: (userData as any).current_medications,
-          preferred_language: (userData as any).preferred_language
+        const socialLinks = toSocialLinks(profileData?.social_links);
+        const mergedProfile: UserProfile = {
+          id: profileData?.id,
+          user_id: user.id,
+          bio: profileData?.bio ?? null,
+          website: profileData?.website ?? null,
+          interests: profileData?.interests ?? [],
+          social_links: socialLinks,
+          created_at: profileData?.created_at,
+          updated_at: profileData?.updated_at,
+          full_name: userData.full_name,
+          avatar_url: profileData?.avatar_url || userData.avatar_url || user.user_metadata?.avatar_url || null,
+          location: userData.location || profileData?.location || null
         };
 
         setProfile(mergedProfile);
         setEditForm({
-          bio: (profileData as any)?.bio || "",
-          location: (userData as any).location || (profileData as any)?.location || "",
-          website: (profileData as any)?.website || "",
-          interests: (profileData as any)?.interests || [],
-          social_links: (profileData as any)?.social_links || {
-            instagram: "",
-            twitter: "",
-            linkedin: "",
-            facebook: ""
-          }
+          bio: profileData?.bio || "",
+          location: userData.location || profileData?.location || "",
+          website: profileData?.website || "",
+          interests: profileData?.interests || [],
+          social_links: socialLinks
         });
       } else {
         // Create profile if it doesn't exist
@@ -412,33 +420,28 @@ const EnhancedProfile = ({ userProfile: propUserProfile, onProfileUpdate }: Enha
     } finally {
       setLoading(false);
     }
-  };
+  }, [user, createProfile]);
 
-  const createProfile = async () => {
-    if (!user) return;
-
-    try {
-      const { data, error } = await supabase
-        .from('user_profiles')
-        .insert({
-          user_id: user.id,
-          bio: "",
-          location: "",
-          website: "",
-          interests: [],
-          social_links: {},
-          privacy_settings: {},
-            avatar_url: null
-          } as any)
-        .select()
-        .single();
-
-      if (error) throw error;
-      setProfile(data);
-    } catch (error) {
-      console.error('Error creating profile:', error);
+  useEffect(() => {
+    if (propUserProfile) {
+      // Use prop data if available
+      setProfile(propUserProfile);
+      setEditForm({
+        bio: propUserProfile.bio || "",
+        location: propUserProfile.location || "",
+        website: propUserProfile.website || "",
+        interests: propUserProfile.interests || [],
+        social_links: toSocialLinks(propUserProfile.social_links)
+      });
+      setLoading(false);
+    } else {
+      fetchProfile();
     }
-  };
+    
+    if (user) {
+      fetchStats();
+    }
+  }, [user, propUserProfile, fetchProfile, fetchStats]);
 
   const updateProfile = async () => {
     if (!user || !profile) return;
@@ -453,10 +456,9 @@ const EnhancedProfile = ({ userProfile: propUserProfile, onProfileUpdate }: Enha
           updated_at: new Date().toISOString()
       };
 
-      const { error } = await (supabase as any)
+      const { error } = await supabase
         .from('user_profiles')
-        .update(updateData)
-        .eq('user_id', user.id);
+        .upsert({ user_id: user.id, ...updateData }, { onConflict: 'user_id' });
 
       if (error) throw error;
 
@@ -465,7 +467,7 @@ const EnhancedProfile = ({ userProfile: propUserProfile, onProfileUpdate }: Enha
       if (onProfileUpdate) {
         onProfileUpdate();
       } else {
-      fetchProfile();
+        fetchProfile();
       }
     } catch (error) {
       console.error('Error updating profile:', error);
@@ -473,36 +475,26 @@ const EnhancedProfile = ({ userProfile: propUserProfile, onProfileUpdate }: Enha
     }
   };
 
-  const uploadAvatar = async (file: File) => {
+  const handleAvatarFile = async (file: File) => {
     if (!user) return;
 
     setUploading(true);
     try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-      const filePath = `avatars/${fileName}`;
+      // Uploads to avatars/<user id>/... and returns the public URL
+      const { url: publicUrl, error: uploadError } = await uploadAvatar(file, user.id);
+      if (uploadError || !publicUrl) throw new Error(uploadError || 'Upload failed');
 
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(filePath, file);
+      const { error: profileError } = await supabase
+        .from('user_profiles')
+        .upsert(
+          { user_id: user.id, avatar_url: publicUrl, updated_at: new Date().toISOString() },
+          { onConflict: 'user_id' }
+        );
 
-      if (uploadError) throw uploadError;
+      if (profileError) throw profileError;
 
-      const { data: { publicUrl } } = supabase.storage
-        .from('avatars')
-        .getPublicUrl(filePath);
-
-      // Update user avatar in auth.users
-      const { error: updateError } = await supabase.auth.updateUser({
-        data: { avatar_url: publicUrl }
-      });
-
-      if (updateError) throw updateError;
-
-      // Update profile state with new avatar URL
       setProfile(prev => prev ? { ...prev, avatar_url: publicUrl } : null);
-      
-      // Call onProfileUpdate if provided
+
       if (onProfileUpdate) {
         onProfileUpdate();
       }
@@ -584,7 +576,7 @@ const EnhancedProfile = ({ userProfile: propUserProfile, onProfileUpdate }: Enha
                         accept="image/*"
                         onChange={(e) => {
                           const file = e.target.files?.[0];
-                          if (file) uploadAvatar(file);
+                          if (file) handleAvatarFile(file);
                         }}
                         disabled={uploading}
                       />
@@ -677,11 +669,13 @@ const EnhancedProfile = ({ userProfile: propUserProfile, onProfileUpdate }: Enha
             </CardHeader>
             <CardContent>
               <div className="flex flex-wrap gap-2">
-                {profile?.interests?.map((interest, index) => (
-                  <Badge key={index} variant="secondary">
-                    {interest}
-                  </Badge>
-                )) || (
+                {profile?.interests?.length ? (
+                  profile.interests.map((interest, index) => (
+                    <Badge key={index} variant="secondary">
+                      {interest}
+                    </Badge>
+                  ))
+                ) : (
                   <p className="text-muted-foreground">No interests added yet.</p>
                 )}
               </div>
@@ -698,18 +692,26 @@ const EnhancedProfile = ({ userProfile: propUserProfile, onProfileUpdate }: Enha
                 {profile?.website && (
                   <div className="flex items-center gap-2">
                     <Globe className="w-4 h-4 text-muted-foreground" />
-                    <a href={profile.website} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                      {profile.website}
-                    </a>
+                    {isSafeHttpUrl(profile.website) ? (
+                      <a href={profile.website} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                        {profile.website}
+                      </a>
+                    ) : (
+                      <span className="text-muted-foreground">{profile.website}</span>
+                    )}
                   </div>
                 )}
-                {profile?.social_links && Object.entries(profile.social_links as Record<string, string>).map(([platform, url]) => (
+                {profile?.social_links && Object.entries(profile.social_links).map(([platform, url]) => (
                   url && (
                     <div key={platform} className="flex items-center gap-2">
                       <span className="capitalize">{platform}:</span>
-                      <a href={url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                        {url}
-                      </a>
+                      {isSafeHttpUrl(url) ? (
+                        <a href={url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                          {url}
+                        </a>
+                      ) : (
+                        <span className="text-muted-foreground">{url}</span>
+                      )}
                     </div>
                   )
                 ))}

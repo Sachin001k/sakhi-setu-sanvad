@@ -6,7 +6,6 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import Navigation from "@/components/Navigation";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import GoogleTranslate from "@/components/GoogleTranslate";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
@@ -15,11 +14,39 @@ import { useEffect, useState, useCallback } from "react";
 import RecentActivity from "@/components/RecentActivity";
 import { supabase } from "@/integrations/supabase/client";
 
+type SymptomTrend = 'none' | 'insufficient' | 'improving' | 'worsening' | 'stable';
+
+const TREND_WINDOW = 5;
+
+// Compare average severity of the latest entries with the ones before them.
+const computeSymptomTrend = (severitiesNewestFirst: number[]): SymptomTrend => {
+  if (severitiesNewestFirst.length === 0) return 'none';
+  const windowSize = Math.min(TREND_WINDOW, Math.floor(severitiesNewestFirst.length / 2));
+  if (windowSize < 2) return 'insufficient';
+
+  const average = (values: number[]) => values.reduce((sum, v) => sum + v, 0) / values.length;
+  const delta =
+    average(severitiesNewestFirst.slice(0, windowSize)) -
+    average(severitiesNewestFirst.slice(windowSize, windowSize * 2));
+
+  if (delta >= 1) return 'worsening';
+  if (delta <= -1) return 'improving';
+  return 'stable';
+};
+
+const trendDescriptions: Record<SymptomTrend, string> = {
+  none: 'Log your symptoms to see your trend',
+  insufficient: 'Log a few more symptoms to see your trend',
+  improving: 'Your recent symptom severity is lower than before',
+  worsening: 'Your recent symptom severity is higher than before',
+  stable: 'Your recent symptom severity is steady',
+};
+
 const Dashboard = () => {
   const navigate = useNavigate();
   const { user, signOut, loading } = useAuth();
   const [wellnessTip, setWellnessTip] = useState<{ title: string; content: string } | null>(null);
-  const [hasSymptoms, setHasSymptoms] = useState(false);
+  const [symptomTrend, setSymptomTrend] = useState<SymptomTrend>('none');
 
   useEffect(() => {
     if (!loading && !user) {
@@ -31,32 +58,47 @@ const Dashboard = () => {
     if (!user) return;
     
     try {
-      // Check if user has logged any symptoms
+      // Recent symptom severities, newest first, to describe the user's real trend
       const { data: symptoms, error } = await supabase
         .from('symptoms')
-        .select('id')
+        .select('severity')
         .eq('user_id', user.id)
-        .limit(1);
+        .order('recorded_at', { ascending: false })
+        .limit(TREND_WINDOW * 2);
 
-      if (!error && symptoms && symptoms.length > 0) {
-        setHasSymptoms(true);
-      } else {
-        setHasSymptoms(false);
-      }
+      if (error) throw error;
+
+      setSymptomTrend(computeSymptomTrend((symptoms ?? []).map((s) => s.severity)));
     } catch (error) {
       console.error('Error fetching user data:', error);
     }
   }, [user]);
 
   useEffect(() => {
-    const fetchTip = async () => {
-      if (typeof window === "undefined") return;
+    if (!user) return;
 
+    const fetchTipsForLanguage = (language: string) =>
+      supabase
+        .from("wellness_tips")
+        .select("title, content")
+        .eq("is_active", true)
+        .eq("language", language);
+
+    const fetchTip = async () => {
       try {
-        const { data, error } = await supabase
-          .from("wellness_tips")
-          .select("title, content")
-        
+        const { data: profile } = await supabase
+          .from("users")
+          .select("preferred_language")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        const language = profile?.preferred_language || "en";
+
+        let { data, error } = await fetchTipsForLanguage(language);
+
+        if (!error && (!data || data.length === 0) && language !== "en") {
+          ({ data, error } = await fetchTipsForLanguage("en"));
+        }
 
         if (error) {
           console.error("Failed to load wellness tips:", error);
@@ -64,7 +106,6 @@ const Dashboard = () => {
         }
 
         if (!data || data.length === 0) return;
-        console.log("Wellness tips fetched:", data);
 
         const randomTip = data[Math.floor(Math.random() * data.length)];
         setWellnessTip({ title: randomTip.title, content: randomTip.content });
@@ -73,10 +114,8 @@ const Dashboard = () => {
       }
     };
 
-    if (user) {
-      fetchUserData();
-      fetchTip();
-    }
+    fetchUserData();
+    fetchTip();
   }, [user, fetchUserData]);
 
   if (loading) {
@@ -107,8 +146,8 @@ const Dashboard = () => {
   const insights = [
     {
       icon: Heart,
-      title: "Today's Advice",
-      description: "Practice 10 minutes of meditation",
+      title: "Wellness Idea",
+      description: "A few minutes of meditation can help ease stress",
       bgColor: "bg-primary-light",
       iconColor: "text-primary",
       onClick: () => {
@@ -119,7 +158,7 @@ const Dashboard = () => {
     {
       icon: TrendingUp,
       title: "Your Trend",
-      description: "Sleep quality has improved",
+      description: trendDescriptions[symptomTrend],
       bgColor: "bg-energy-light",
       iconColor: "text-energy",
       onClick: () => {
@@ -130,7 +169,7 @@ const Dashboard = () => {
     {
       icon: Users,
       title: "Community Chat",
-      description: "New messages available",
+      description: "Connect with other women on the same journey",
       bgColor: "bg-secondary-light",
       iconColor: "text-secondary",
       onClick: () => {
@@ -228,7 +267,6 @@ const Dashboard = () => {
           </div>
           <div className="flex gap-1 sm:gap-2 flex-wrap">
             <GoogleTranslate />
-            {/* <ThemeToggle /> */}
             <NotificationBell />
             <AlertDialog>
               <AlertDialogTrigger asChild>
@@ -284,7 +322,7 @@ const Dashboard = () => {
               </motion.div>
               <div className="min-w-0 flex-1">
                 <h2 className="text-lg sm:text-xl font-bold">Today's Wellness Tip</h2>
-                <p className="text-xs sm:text-sm text-muted-foreground">AI-powered insight</p>
+                <p className="text-xs sm:text-sm text-muted-foreground">General wellness guidance</p>
               </div>
             </div>
             <p className="text-sm sm:text-base text-foreground leading-relaxed">

@@ -1,30 +1,26 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
-import { 
-  Mic, 
-  MicOff, 
-  Volume2, 
-  VolumeX, 
-  Send, 
-  Loader2, 
-  Bot, 
-  User, 
+import {
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
+  Send,
+  Loader2,
+  Bot,
+  User,
   MessageCircle,
-  Settings,
-  Play,
-  Pause,
   Square,
-  RotateCcw,
-  Brain,
-  Heart
+  RotateCcw
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useGemini } from '@/hooks/useGemini';
+import { createNotification } from '@/lib/notifications';
 import { toast } from 'sonner';
 
 interface VoiceMessage {
@@ -32,9 +28,48 @@ interface VoiceMessage {
   text: string;
   isUser: boolean;
   timestamp: Date;
-  audioUrl?: string;
-  isPlaying?: boolean;
 }
+
+// Minimal Web Speech API typings (not included in lib.dom for all TS versions)
+interface SpeechRecognitionResultLike {
+  isFinal: boolean;
+  0: { transcript: string };
+}
+
+interface SpeechRecognitionEventLike {
+  resultIndex: number;
+  results: ArrayLike<SpeechRecognitionResultLike>;
+}
+
+interface SpeechRecognitionErrorEventLike {
+  error: string;
+}
+
+interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onstart: (() => void) | null;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+}
+
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
+
+type SessionId = 'voice_session' | 'text_session';
+
+// Strip markdown formatting so replies read and speak naturally
+const formatResponse = (response: string) =>
+  response
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/#{1,6}\s*/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 
 const VoiceAssistant: React.FC = () => {
   const [isListening, setIsListening] = useState(false);
@@ -43,74 +78,46 @@ const VoiceAssistant: React.FC = () => {
   const [currentTranscript, setCurrentTranscript] = useState('');
   const [isMuted, setIsMuted] = useState(false);
   const [isSupported, setIsSupported] = useState(false);
-  const [recognition, setRecognition] = useState<any>(null);
   const [synthesis, setSynthesis] = useState<SpeechSynthesis | null>(null);
-  const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [textInput, setTextInput] = useState('');
   const [showTextInput, setShowTextInput] = useState(false);
-  
+  const [userAge, setUserAge] = useState<number | null>(null);
+
   const { user } = useAuth();
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  
-  const { 
-    isLoading: aiLoading, 
-    generateWellnessAdvice, 
-    analyzeSymptoms,
-    generateMotivation 
-  } = useGemini({
-    onSuccess: (response) => {
-      // Format response by removing markdown formatting
-      const formattedResponse = response
-        .replace(/\*\*(.*?)\*\*/g, '$1') // Remove bold formatting
-        .replace(/\*(.*?)\*/g, '$1') // Remove italic formatting
-        .replace(/#{1,6}\s*/g, '') // Remove headers
-        .replace(/\n{3,}/g, '\n\n') // Reduce multiple line breaks
-        .trim();
-      
-      // Handle AI response for both voice and text
-      const botMessage: VoiceMessage = {
-        id: (Date.now() + 1).toString(),
-        text: formattedResponse,
-        isUser: false,
-        timestamp: new Date()
-      };
-      setMessages(prev => [...prev, botMessage]);
-      
-      // Speak the response if not muted
-      if (synthesis && !isMuted) {
-        speakText(formattedResponse);
-      }
-      
-      // Auto-scroll to bottom after a short delay
-      setTimeout(() => {
-        if (messagesEndRef.current) {
-          messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-        }
-      }, 300);
-    },
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  // Always points at the latest handleVoiceInput so the recognition callback never goes stale
+  const voiceInputHandlerRef = useRef<(text: string) => void>(() => {});
+
+  const { generateWellnessAdvice } = useGemini({
     onError: (error) => console.error('AI Error:', error)
   });
 
   useEffect(() => {
     // Check for speech recognition support
-    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const speechWindow = window as unknown as {
+      SpeechRecognition?: SpeechRecognitionCtor;
+      webkitSpeechRecognition?: SpeechRecognitionCtor;
+    };
+    const SpeechRecognition = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
+
+    if (SpeechRecognition) {
       const recognitionInstance = new SpeechRecognition();
-      
+
       recognitionInstance.continuous = false;
       recognitionInstance.interimResults = true;
       recognitionInstance.lang = 'en-US';
-      
+
       recognitionInstance.onstart = () => {
         setIsListening(true);
         setCurrentTranscript('');
       };
-      
-      recognitionInstance.onresult = (event: any) => {
+
+      recognitionInstance.onresult = (event) => {
         let finalTranscript = '';
         let interimTranscript = '';
-        
+
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const transcript = event.results[i][0].transcript;
           if (event.results[i].isFinal) {
@@ -119,25 +126,25 @@ const VoiceAssistant: React.FC = () => {
             interimTranscript += transcript;
           }
         }
-        
+
         setCurrentTranscript(interimTranscript);
-        
+
         if (finalTranscript) {
-          handleVoiceInput(finalTranscript);
+          voiceInputHandlerRef.current(finalTranscript);
         }
       };
-      
-      recognitionInstance.onerror = (event: any) => {
+
+      recognitionInstance.onerror = (event) => {
         console.error('Speech recognition error:', event.error);
         setIsListening(false);
         toast.error('Speech recognition error. Please try again.');
       };
-      
+
       recognitionInstance.onend = () => {
         setIsListening(false);
       };
-      
-      setRecognition(recognitionInstance);
+
+      recognitionRef.current = recognitionInstance;
       setIsSupported(true);
     }
 
@@ -146,196 +153,161 @@ const VoiceAssistant: React.FC = () => {
       setSynthesis(window.speechSynthesis);
     }
 
-    // Load previous conversations
-    loadConversations();
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.onresult = null;
+        recognitionRef.current.onend = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.onstart = null;
+        recognitionRef.current.abort();
+        recognitionRef.current = null;
+      }
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
   }, []);
 
-  const loadConversations = async () => {
-    if (!user) return;
-    
+  const loadConversations = useCallback(async (userId: string) => {
     try {
       const { data, error } = await supabase
         .from('chatbot_conversations')
-        .select('*')
-        .eq('user_id', user.id)
+        .select('id, message, response, is_user_message, created_at')
+        .eq('user_id', userId)
         .order('created_at', { ascending: true })
         .limit(50);
 
       if (error) throw error;
 
-      const formattedMessages: VoiceMessage[] = data.map(msg => ({
+      const formattedMessages: VoiceMessage[] = (data ?? []).map(msg => ({
         id: msg.id,
-        text: msg.is_user_message ? msg.message : msg.response || '',
-        isUser: msg.is_user_message,
-        timestamp: new Date(msg.created_at),
-        audioUrl: msg.audio_url
+        text: msg.is_user_message ? msg.message : msg.message || msg.response || '',
+        isUser: msg.is_user_message ?? true,
+        timestamp: new Date(msg.created_at)
       }));
 
       setMessages(formattedMessages);
     } catch (error) {
       console.error('Error loading conversations:', error);
     }
+  }, []);
+
+  // Load history and profile once the authenticated user is known
+  useEffect(() => {
+    if (!user) return;
+
+    loadConversations(user.id);
+
+    let cancelled = false;
+    supabase
+      .from('users')
+      .select('age')
+      .eq('id', user.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.error('Error loading user age:', error);
+          return;
+        }
+        setUserAge(typeof data?.age === 'number' ? data.age : null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, loadConversations]);
+
+  const saveMessage = async (sessionId: SessionId, text: string, isUserMessage: boolean) => {
+    if (!user) return;
+
+    const { error } = await supabase
+      .from('chatbot_conversations')
+      .insert({
+        user_id: user.id,
+        session_id: sessionId,
+        message: text,
+        is_user_message: isUserMessage,
+        language: 'en'
+      });
+
+    if (error) {
+      console.error('Error saving conversation message:', error);
+    }
+  };
+
+  const processQuery = async (rawText: string, sessionId: SessionId) => {
+    const text = rawText.trim();
+    if (!text) return;
+
+    const userMessage: VoiceMessage = {
+      id: Date.now().toString(),
+      text,
+      isUser: true,
+      timestamp: new Date()
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    setIsProcessing(true);
+
+    try {
+      await saveMessage(sessionId, text, true);
+
+      const response = formatResponse(await generateAIResponse(text));
+
+      const botMessage: VoiceMessage = {
+        id: (Date.now() + 1).toString(),
+        text: response,
+        isUser: false,
+        timestamp: new Date()
+      };
+
+      setMessages(prev => [...prev, botMessage]);
+
+      await saveMessage(sessionId, response, false);
+
+      if (synthesis && !isMuted) {
+        speakText(response);
+      }
+
+      void createNotification(
+        'AI Assistant Response',
+        sessionId === 'voice_session'
+          ? 'Your voice query has been processed and responded to'
+          : 'Your text query has been processed and responded to',
+        'ai',
+        '/profile?tab=assistant'
+      );
+    } catch (error) {
+      console.error('Error processing input:', error);
+      toast.error('Error processing your request. Please try again.');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleVoiceInput = async (text: string) => {
-    if (!text.trim()) return;
-
-    const userMessage: VoiceMessage = {
-      id: Date.now().toString(),
-      text: text.trim(),
-      isUser: true,
-      timestamp: new Date()
-    };
-
-    setMessages(prev => [...prev, userMessage]);
     setCurrentTranscript('');
-    setIsProcessing(true);
-
-    try {
-      // Save user message to database
-      if (user) {
-        await supabase
-          .from('chatbot_conversations')
-          .insert({
-            user_id: user.id,
-            session_id: 'voice_session',
-            message: text.trim(),
-            is_user_message: true,
-            language: 'en'
-          });
-      }
-
-      // Generate AI response using Gemini
-      const response = await generateAIResponse(text.trim());
-      
-      const botMessage: VoiceMessage = {
-        id: (Date.now() + 1).toString(),
-        text: response,
-        isUser: false,
-        timestamp: new Date()
-      };
-
-      setMessages(prev => [...prev, botMessage]);
-
-      // Save bot response to database
-      if (user) {
-        await supabase
-          .from('chatbot_conversations')
-          .insert({
-            user_id: user.id,
-            session_id: 'voice_session',
-            response: response,
-            is_user_message: false,
-            language: 'en'
-          });
-      }
-
-      // Speak the response
-      if (synthesis && !isMuted) {
-        speakText(response);
-      }
-
-      // Create notification for AI interaction
-      if ((window as any).createNotification) {
-        (window as any).createNotification(
-          'AI Assistant Response',
-          'Your voice query has been processed and responded to',
-          'ai',
-          '/profile?tab=assistant'
-        );
-      }
-
-    } catch (error) {
-      console.error('Error processing voice input:', error);
-      toast.error('Error processing your request. Please try again.');
-    } finally {
-      setIsProcessing(false);
-    }
+    await processQuery(text, 'voice_session');
   };
+
+  voiceInputHandlerRef.current = handleVoiceInput;
 
   const handleTextInput = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!textInput.trim()) return;
+    const text = textInput.trim();
+    if (!text) return;
 
-    const userMessage: VoiceMessage = {
-      id: Date.now().toString(),
-      text: textInput.trim(),
-      isUser: true,
-      timestamp: new Date()
-    };
-
-    setMessages(prev => [...prev, userMessage]);
     setTextInput('');
-    setIsProcessing(true);
-
-    try {
-      // Save user message to database
-      if (user) {
-        await supabase
-          .from('chatbot_conversations')
-          .insert({
-            user_id: user.id,
-            session_id: 'text_session',
-            message: textInput.trim(),
-            is_user_message: true,
-            language: 'en'
-          });
-      }
-
-      // Generate AI response using Gemini
-      const response = await generateAIResponse(textInput.trim());
-      
-      const botMessage: VoiceMessage = {
-        id: (Date.now() + 1).toString(),
-        text: response,
-        isUser: false,
-        timestamp: new Date()
-      };
-
-      setMessages(prev => [...prev, botMessage]);
-
-      // Save bot response to database
-      if (user) {
-        await supabase
-          .from('chatbot_conversations')
-          .insert({
-            user_id: user.id,
-            session_id: 'text_session',
-            response: response,
-            is_user_message: false,
-            language: 'en'
-          });
-      }
-
-      // Speak the response
-      if (synthesis && !isMuted) {
-        speakText(response);
-      }
-
-      // Create notification for AI text interaction
-      if ((window as any).createNotification) {
-        (window as any).createNotification(
-          'AI Assistant Response',
-          'Your text query has been processed and responded to',
-          'ai',
-          '/profile?tab=assistant'
-        );
-      }
-
-    } catch (error) {
-      console.error('Error processing text input:', error);
-      toast.error('Error processing your request. Please try again.');
-    } finally {
-      setIsProcessing(false);
-    }
+    await processQuery(text, 'text_session');
   };
 
   const generateAIResponse = async (input: string): Promise<string> => {
     try {
       // Use Gemini AI for intelligent responses
       const response = await generateWellnessAdvice(input, {
-        age: 45, // You can make this dynamic
-        symptoms: [], // You can fetch from user's tracked symptoms
+        ...(userAge !== null ? { age: userAge } : {}),
+        symptoms: [],
         concerns: ['menopause support', 'wellness guidance']
       });
       return response;
@@ -376,6 +348,7 @@ const VoiceAssistant: React.FC = () => {
     }
   };
 
+
   const speakText = (text: string) => {
     if (!synthesis || isMuted) return;
 
@@ -396,14 +369,14 @@ const VoiceAssistant: React.FC = () => {
   };
 
   const startListening = () => {
-    if (recognition && !isListening) {
-      recognition.start();
+    if (recognitionRef.current && !isListening) {
+      recognitionRef.current.start();
     }
   };
 
   const stopListening = () => {
-    if (recognition && isListening) {
-      recognition.stop();
+    if (recognitionRef.current && isListening) {
+      recognitionRef.current.stop();
     }
   };
 
@@ -418,12 +391,8 @@ const VoiceAssistant: React.FC = () => {
     setMessages([]);
   };
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
   useEffect(() => {
-    scrollToBottom();
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   if (!isSupported) {

@@ -5,17 +5,41 @@ import { Download, FileText, Calendar, User, Activity, Video, MessageCircle } fr
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import jsPDF from 'jspdf';
+import { createNotification } from '@/lib/notifications';
+import type { User as AuthUser } from '@supabase/supabase-js';
 
 interface PDFReportGeneratorProps {
-  userProfile?: any;
+  userProfile?: AuthUser | null;
   aiReport?: string;
+}
+
+interface ReportSymptom {
+  symptom_type: string | null;
+  severity: number;
+  notes: string | null;
+  recorded_at: string;
+}
+
+interface ReportPost {
+  id: string;
+  content: string;
+  created_at: string;
+}
+
+interface ReportData {
+  user: { full_name?: string | null; email?: string | null } | null;
+  profile: { location?: string | null; bio?: string | null };
+  symptoms: ReportSymptom[];
+  wellnessPosts: ReportPost[];
+  stats: {
+    symptomsCount: number;
+    wellnessPostsCount: number;
+  };
 }
 
 const PDFReportGenerator: React.FC<PDFReportGeneratorProps> = ({ userProfile, aiReport }) => {
   const { user } = useAuth();
   const [isGenerating, setIsGenerating] = useState(false);
-  const [reportData, setReportData] = useState<any>(null);
 
   const generateReport = async () => {
     if (!user) return;
@@ -36,13 +60,23 @@ const PDFReportGenerator: React.FC<PDFReportGeneratorProps> = ({ userProfile, ai
         .eq('user_id', user.id)
         .single();
 
-      // Fetch symptoms data for wellness focus
+      // Fetch the most recent symptoms for the detail section
       const { data: symptoms } = await supabase
         .from('symptoms')
-        .select('*')
+        .select('symptom_type, severity, notes, recorded_at')
         .eq('user_id', user.id)
         .order('recorded_at', { ascending: false })
         .limit(10);
+
+      // Total number of symptoms tracked (not capped by the limit above)
+      const { count: symptomsCount, error: countError } = await supabase
+        .from('symptoms')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.id);
+
+      if (countError) {
+        console.error('Error counting symptoms:', countError);
+      }
 
       // Fetch wellness-related posts only
       const { data: wellnessPosts } = await supabase
@@ -53,19 +87,18 @@ const PDFReportGenerator: React.FC<PDFReportGeneratorProps> = ({ userProfile, ai
         .order('created_at', { ascending: false })
         .limit(5);
 
-      const reportData = {
+      const reportData: ReportData = {
         user: userData,
         profile: profileData || {},
         symptoms: symptoms || [],
         wellnessPosts: wellnessPosts || [],
         stats: {
-          symptomsCount: symptoms?.length || 0,
+          symptomsCount: symptomsCount ?? symptoms?.length ?? 0,
           wellnessPostsCount: wellnessPosts?.length || 0
         }
       };
 
-      setReportData(reportData);
-      createPDF(reportData);
+      await createPDF(reportData);
     } catch (error) {
       console.error('Error generating report:', error);
       toast.error('Failed to generate report');
@@ -74,7 +107,8 @@ const PDFReportGenerator: React.FC<PDFReportGeneratorProps> = ({ userProfile, ai
     }
   };
 
-  const createPDF = (data: any) => {
+  const createPDF = async (data: ReportData) => {
+    const { default: jsPDF } = await import('jspdf');
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
@@ -173,7 +207,7 @@ const PDFReportGenerator: React.FC<PDFReportGeneratorProps> = ({ userProfile, ai
 
       doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
-      data.symptoms.forEach((symptom: any, index: number) => {
+      data.symptoms.forEach((symptom, index) => {
         if (yPosition > pageHeight - 30) {
           doc.addPage();
           yPosition = 20;
@@ -201,7 +235,7 @@ const PDFReportGenerator: React.FC<PDFReportGeneratorProps> = ({ userProfile, ai
 
       doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
-      data.wellnessPosts.forEach((post: any, index: number) => {
+      data.wellnessPosts.forEach((post, index) => {
         if (yPosition > pageHeight - 30) {
           doc.addPage();
           yPosition = 20;
@@ -231,14 +265,12 @@ const PDFReportGenerator: React.FC<PDFReportGeneratorProps> = ({ userProfile, ai
     toast.success('Report generated and downloaded successfully!');
 
     // Create notification for PDF report generation
-    if ((window as any).createNotification) {
-      (window as any).createNotification(
-        'PDF Report Downloaded',
-        'Your comprehensive wellness report has been downloaded',
-        'report',
-        '/profile?tab=reports'
-      );
-    }
+    void createNotification(
+      'PDF Report Downloaded',
+      'Your comprehensive wellness report has been downloaded',
+      'report',
+      '/profile?tab=reports'
+    );
   };
 
   return (

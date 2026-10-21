@@ -7,7 +7,7 @@ import { User, Settings, Bell, Shield, Heart, LogOut, ChevronRight, ArrowLeft, F
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import HealthReports from "@/components/HealthReports";
 import PHCDirectory from "@/components/PHCDirectory";
@@ -17,14 +17,19 @@ import VideoLibrary from "@/components/VideoLibrary";
 import EnhancedChat from "@/components/EnhancedChat";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 
+type ProfileData = Record<string, unknown> & {
+  email?: string;
+  avatar_url?: string | null;
+};
+
 const Profile = () => {
   const navigate = useNavigate();
   const { user, signOut, loading } = useAuth();
   const [activeTab, setActiveTab] = useState("profile");
-  const [userProfile, setUserProfile] = useState<any>(null);
+  const [userProfile, setUserProfile] = useState<ProfileData | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
 
-  const fetchUserProfile = async () => {
+  const fetchUserProfile = useCallback(async () => {
     if (!user) return;
     
     try {
@@ -34,7 +39,7 @@ const Profile = () => {
         .from('users')
         .select('*')
         .eq('id', user.id)
-        .single();
+        .maybeSingle();
 
       if (userError && userError.code !== 'PGRST116') {
         throw userError;
@@ -45,7 +50,7 @@ const Profile = () => {
         .from('user_profiles')
         .select('*')
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
 
       if (profileError && profileError.code !== 'PGRST116') {
         throw profileError;
@@ -55,7 +60,7 @@ const Profile = () => {
         ...(userData || {}),
         ...(profileData || {}),
         email: user.email,
-        avatar_url: user.user_metadata?.avatar_url
+        avatar_url: profileData?.avatar_url || userData?.avatar_url || user.user_metadata?.avatar_url || null
       });
     } catch (error) {
       console.error('Error fetching user profile:', error);
@@ -63,7 +68,7 @@ const Profile = () => {
     } finally {
       setProfileLoading(false);
     }
-  };
+  }, [user]);
 
   const handleEditProfile = () => {
     setActiveTab("edit");
@@ -87,7 +92,7 @@ const Profile = () => {
     if (user) {
       fetchUserProfile();
     }
-  }, [user]);
+  }, [user, fetchUserProfile]);
 
   useEffect(() => {
     const handleSwitchToEditTab = () => {
@@ -132,7 +137,7 @@ const Profile = () => {
     { 
       icon: Heart, 
       label: "Wellness Goals",
-      onClick: () => toast.success("Set your wellness goals!"),
+      onClick: () => toast.info("Wellness goals coming soon!"),
     },
     { 
       icon: LogOut, 

@@ -1,85 +1,152 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { 
-  MessageCircle, 
-  Send, 
-  Heart, 
-  MoreVertical, 
-  Reply,
-  ThumbsUp,
-  Share2,
-  Flag,
+import {
+  MessageCircle,
+  Send,
+  Heart,
   Smile,
   Loader2,
   Users,
-  Clock,
-  Check,
-  CheckCheck,
-  Wifi
+  CheckCheck
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { createNotification } from '@/lib/notifications';
 import { toast } from 'sonner';
 
 interface Message {
   id: string;
-  user_id: string;
+  user_id: string | null;
+  author_name: string | null;
+  author_avatar_url: string | null;
   content: string;
   created_at: string;
-  user_name?: string;
   likes: number;
-  is_anonymous?: boolean;
-  replies?: Reply[];
+  is_anonymous: boolean;
+  is_own: boolean;
+  liked_by_me: boolean;
 }
 
-interface Reply {
-  id: string;
-  user_id: string;
-  content: string;
-  created_at: string;
-  user_name?: string;
-}
+const POST_COLUMNS = 'id, user_id, author_name, author_avatar_url, content, created_at, likes, is_anonymous, is_own, liked_by_me';
+
+// Within this many pixels of the end of the list counts as "at the bottom".
+const BOTTOM_THRESHOLD_PX = 40;
+
+const getDisplayName = (message: Message) =>
+  message.author_name || (message.is_anonymous ? 'Anonymous' : 'Community member');
+
+const fetchPostById = async (id: string): Promise<Message | null> => {
+  const { data, error } = await supabase
+    .from('community_posts_public')
+    .select(POST_COLUMNS)
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Error fetching post:', error);
+    return null;
+  }
+  return (data as Message | null) ?? null;
+};
 
 export const CommunityChat: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
-  const [replyingTo, setReplyingTo] = useState<string | null>(null);
-  const [replyContent, setReplyContent] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState<number>(0);
   const [isConnected, setIsConnected] = useState(false);
   const [newMessageCount, setNewMessageCount] = useState(0);
+  const [pendingLikes, setPendingLikes] = useState<Set<string>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
   const { user } = useAuth();
 
   // Common emojis for quick access
   const commonEmojis = ['😊', '❤️', '👍', '😢', '🤗', '💪', '🌟', '🙏', '😅', '💯', '🎉', '🔥'];
 
+  const appendMessage = useCallback((message: Message) => {
+    setMessages(prev => (prev.some(m => m.id === message.id) ? prev : [...prev, message]));
+  }, []);
+
   useEffect(() => {
-    if (user) {
-      fetchMessages();
-      const unsubscribe = subscribeToMessages();
-      const presenceUnsubscribe = trackOnlineStatus();
-      
-      return () => {
-        if (unsubscribe) unsubscribe();
-        if (presenceUnsubscribe) presenceUnsubscribe();
-      };
-    }
-  }, [user]);
+    if (!user) return;
 
-  const trackOnlineStatus = () => {
-    if (!user) return () => {};
+    let cancelled = false;
 
-    // Track user as online
+    const fetchMessages = async () => {
+      try {
+        setLoading(true);
+        const { data, error } = await supabase
+          .from('community_posts_public')
+          .select(POST_COLUMNS)
+          .order('created_at', { ascending: false })
+          .limit(50);
+
+        if (error) throw error;
+        if (cancelled) return;
+
+        isAtBottomRef.current = true;
+        setMessages(((data as Message[] | null) ?? []).reverse());
+      } catch (error) {
+        console.error('Error fetching messages:', error);
+        if (!cancelled) toast.error('Failed to load messages');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    fetchMessages();
+
+    // The base table is owner-only, so other users' changes arrive as a
+    // minimal broadcast ({ id, likes }) and the row is re-read from the view.
+    const postsChannel = supabase
+      .channel('community-posts')
+      .on('broadcast', { event: 'insert' }, async ({ payload }) => {
+        const id = payload?.id as string | undefined;
+        if (!id) return;
+
+        const post = await fetchPostById(id);
+        if (!post || cancelled) return;
+
+        if (post.is_own) {
+          isAtBottomRef.current = true;
+        } else {
+          if (!isAtBottomRef.current) {
+            setNewMessageCount(count => count + 1);
+          }
+          toast.success(`New message from ${getDisplayName(post)}`);
+        }
+        appendMessage(post);
+      })
+      .on('broadcast', { event: 'update' }, ({ payload }) => {
+        const id = payload?.id as string | undefined;
+        if (!id || typeof payload.likes !== 'number') return;
+        setMessages(prev =>
+          prev.map(msg => (msg.id === id ? { ...msg, likes: payload.likes } : msg))
+        );
+      })
+      .on('broadcast', { event: 'delete' }, ({ payload }) => {
+        const id = payload?.id as string | undefined;
+        if (!id) return;
+        setMessages(prev => prev.filter(msg => msg.id !== id));
+      })
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR') {
+          console.error('Community posts channel subscription error');
+          toast.error('Failed to connect to real-time updates');
+        }
+      });
+
+    // Online users: count comes only from the synced presence state, so
+    // join/leave events can't double-count.
     const presenceChannel = supabase.channel('online-users', {
       config: {
         presence: {
@@ -90,17 +157,9 @@ export const CommunityChat: React.FC = () => {
 
     presenceChannel
       .on('presence', { event: 'sync' }, () => {
-        const state = presenceChannel.presenceState();
-        setOnlineUsers(Object.keys(state).length);
-      })
-      .on('presence', { event: 'join' }, ({ key, newPresences }) => {
-        setOnlineUsers(prev => prev + 1);
-      })
-      .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
-        setOnlineUsers(prev => Math.max(0, prev - 1));
+        setOnlineUsers(Object.keys(presenceChannel.presenceState()).length);
       })
       .subscribe(async (status) => {
-        console.log('Presence subscription status:', status);
         if (status === 'SUBSCRIBED') {
           await presenceChannel.track({
             user_id: user.id,
@@ -113,154 +172,33 @@ export const CommunityChat: React.FC = () => {
       });
 
     return () => {
-      console.log('Unsubscribing from presence updates');
-      presenceChannel.unsubscribe();
+      cancelled = true;
+      supabase.removeChannel(postsChannel);
+      supabase.removeChannel(presenceChannel);
     };
-  };
+  }, [user, appendMessage]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    setNewMessageCount(0); // Clear new message count when scrolling to bottom
+    isAtBottomRef.current = true;
+    setNewMessageCount(0);
   };
 
+  const handleScroll = () => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_THRESHOLD_PX;
+    isAtBottomRef.current = atBottom;
+    if (atBottom) setNewMessageCount(0);
+  };
+
+  // Follow new messages only when the user is already at the bottom;
+  // otherwise leave their scroll position alone and let the badge count up.
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  const fetchMessages = async () => {
-    try {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('community_posts')
-        .select(`
-          *,
-          users!community_posts_user_id_fkey(full_name, avatar_url)
-        `)
-        .order('created_at', { ascending: false })
-        .limit(50);
-
-      if (error) throw error;
-
-      const formattedMessages = data?.map(post => ({
-        id: post.id,
-        user_id: post.user_id,
-        content: post.content,
-        created_at: post.created_at,
-        user_name: post.users?.full_name || 'Anonymous',
-        likes: post.likes || 0,
-        is_anonymous: post.is_anonymous || false,
-        replies: []
-      })) || [];
-
-      setMessages(formattedMessages.reverse());
-    } catch (error) {
-      console.error('Error fetching messages:', error);
-      toast.error('Failed to load messages');
-    } finally {
-      setLoading(false);
+    if (isAtBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  };
-
-  const subscribeToMessages = () => {
-    const channel = supabase
-      .channel('community_posts', {
-        config: {
-          broadcast: { self: true },
-          presence: { key: user?.id }
-        }
-      })
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'community_posts'
-        },
-        async (payload) => {
-          console.log('New message received:', payload);
-          const newPost = payload.new as any;
-          
-          // Fetch user details for the new message
-          const { data: userData } = await supabase
-            .from('users')
-            .select('full_name')
-            .eq('id', newPost.user_id)
-            .single();
-
-          const newMessage: Message = {
-            id: newPost.id,
-            user_id: newPost.user_id,
-            content: newPost.content,
-            created_at: newPost.created_at,
-            user_name: userData?.full_name || 'Anonymous',
-            likes: newPost.likes || 0,
-            is_anonymous: newPost.is_anonymous || false,
-            replies: []
-          };
-          
-          setMessages(prev => {
-            // Check if message already exists to avoid duplicates
-            const exists = prev.some(msg => msg.id === newMessage.id);
-            if (exists) return prev;
-            
-            // Show notification for new messages (not from current user)
-            if (newMessage.user_id !== user?.id) {
-              setNewMessageCount(prev => prev + 1);
-              toast.success(`New message from ${newMessage.user_name}`);
-            }
-            
-            return [...prev, newMessage];
-          });
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'community_posts'
-        },
-        (payload) => {
-          console.log('Message updated:', payload);
-          const updatedPost = payload.new as any;
-          setMessages(prev => 
-            prev.map(msg => 
-              msg.id === updatedPost.id 
-                ? { ...msg, likes: updatedPost.likes || 0 }
-                : msg
-            )
-          );
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'community_posts'
-        },
-        (payload) => {
-          console.log('Message deleted:', payload);
-          const deletedPost = payload.old as any;
-          setMessages(prev => prev.filter(msg => msg.id !== deletedPost.id));
-        }
-      )
-      .subscribe((status) => {
-        console.log('Subscription status:', status);
-        if (status === 'SUBSCRIBED') {
-          console.log('Successfully subscribed to real-time updates');
-        } else if (status === 'CHANNEL_ERROR') {
-          console.error('Channel subscription error');
-          toast.error('Failed to connect to real-time updates');
-        }
-      });
-
-    return () => {
-      console.log('Unsubscribing from real-time updates');
-      supabase.removeChannel(channel);
-    };
-  };
-
+  }, [messages]);
 
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -271,29 +209,37 @@ export const CommunityChat: React.FC = () => {
       const content = newMessage.trim();
       const title = content.length > 80 ? `${content.slice(0, 77)}...` : content;
 
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('community_posts')
         .insert([{
           user_id: user.id,
           title, // Supabase table enforces NOT NULL on title
           content,
           is_anonymous: false
-        }]);
+        }])
+        .select('id')
+        .single();
 
       if (error) throw error;
 
       setNewMessage('');
       toast.success('Message sent!');
-      
-      // Create notification for community post
-      if ((window as any).createNotification) {
-        (window as any).createNotification(
-          'Community Post Shared',
-          'Your message has been shared with the community',
-          'post',
-          '/community'
-        );
+
+      // Show it right away; the broadcast may arrive later (or not at all).
+      if (data?.id) {
+        const post = await fetchPostById(data.id);
+        if (post) {
+          isAtBottomRef.current = true;
+          appendMessage(post);
+        }
       }
+
+      createNotification(
+        'Community Post Shared',
+        'Your message has been shared with the community',
+        'community',
+        '/community'
+      );
     } catch (error) {
       console.error('Error sending message:', error);
       toast.error('Failed to send message');
@@ -302,26 +248,33 @@ export const CommunityChat: React.FC = () => {
     }
   };
 
-  const likeMessage = async (messageId: string) => {
-    if (!user) return;
+  const toggleLike = async (messageId: string) => {
+    if (!user || pendingLikes.has(messageId)) return;
 
+    setPendingLikes(prev => new Set(prev).add(messageId));
     try {
-      const { error } = await supabase
-        .from('community_posts')
-        .update({ likes: messages.find(m => m.id === messageId)?.likes + 1 })
-        .eq('id', messageId);
-
+      const { data, error } = await supabase.rpc('toggle_post_like', { p_post_id: messageId });
       if (error) throw error;
 
-      setMessages(prev => 
-        prev.map(msg => 
-          msg.id === messageId 
-            ? { ...msg, likes: msg.likes + 1 }
-            : msg
-        )
-      );
+      const result = (data as { liked: boolean; likes: number }[] | null)?.[0];
+      if (result) {
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.id === messageId
+              ? { ...msg, liked_by_me: result.liked, likes: result.likes }
+              : msg
+          )
+        );
+      }
     } catch (error) {
-      console.error('Error liking message:', error);
+      console.error('Error toggling like:', error);
+      toast.error('Could not update like');
+    } finally {
+      setPendingLikes(prev => {
+        const next = new Set(prev);
+        next.delete(messageId);
+        return next;
+      });
     }
   };
 
@@ -342,11 +295,6 @@ export const CommunityChat: React.FC = () => {
 
   const addEmoji = (emoji: string) => {
     setNewMessage(prev => prev + emoji);
-    setShowEmojiPicker(false);
-  };
-
-  const addEmojiToReply = (emoji: string) => {
-    setReplyContent(prev => prev + emoji);
     setShowEmojiPicker(false);
   };
 
@@ -391,7 +339,11 @@ export const CommunityChat: React.FC = () => {
                 </Badge>
               )}
               {newMessageCount > 0 && (
-                <Badge variant="destructive" className="bg-pink-500 text-white animate-pulse">
+                <Badge
+                  variant="destructive"
+                  className="bg-pink-500 text-white animate-pulse cursor-pointer"
+                  onClick={scrollToBottom}
+                >
                   {newMessageCount} new
                 </Badge>
               )}
@@ -401,7 +353,11 @@ export const CommunityChat: React.FC = () => {
         
         <CardContent className="flex-1 flex flex-col p-0 overflow-hidden">
           {/* Messages List */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
+          <div
+            ref={scrollContainerRef}
+            onScroll={handleScroll}
+            className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0"
+          >
             {messages.length === 0 ? (
               <div className="text-center text-gray-500 py-8">
                 <MessageCircle className="w-12 h-12 mx-auto mb-4 text-gray-300" />
@@ -416,32 +372,48 @@ export const CommunityChat: React.FC = () => {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -20 }}
                     transition={{ delay: index * 0.05 }}
-                    className={`flex ${message.user_id === user?.id ? 'justify-end' : 'justify-start'}`}
+                    className={`flex ${message.is_own ? 'justify-end' : 'justify-start'}`}
                   >
-                    <div className={`max-w-[85%] sm:max-w-[80%] ${message.user_id === user?.id ? 'order-2' : 'order-1'}`}>
-                      <div className={`flex items-start gap-2 sm:gap-3 ${message.user_id === user?.id ? 'flex-row-reverse' : 'flex-row'}`}>
+                    <div className={`max-w-[85%] sm:max-w-[80%] ${message.is_own ? 'order-2' : 'order-1'}`}>
+                      <div className={`flex items-start gap-2 sm:gap-3 ${message.is_own ? 'flex-row-reverse' : 'flex-row'}`}>
                         <Avatar className="w-6 h-6 sm:w-8 sm:h-8">
+                          {message.author_avatar_url && (
+                            <AvatarImage src={message.author_avatar_url} alt={getDisplayName(message)} />
+                          )}
                           <AvatarFallback className="bg-gradient-to-r from-pink-500 to-purple-500 text-white text-xs">
-                            {getInitials(message.user_name || 'A')}
+                            {getInitials(getDisplayName(message))}
                           </AvatarFallback>
                         </Avatar>
-                        <div className={`flex-1 ${message.user_id === user?.id ? 'text-right' : 'text-left'}`}>
+                        <div className={`flex-1 ${message.is_own ? 'text-right' : 'text-left'}`}>
                           <div className={`inline-block p-2 sm:p-3 rounded-2xl break-words ${
-                            message.user_id === user?.id 
+                            message.is_own 
                               ? 'bg-gradient-to-r from-pink-500 to-purple-500 text-white' 
                               : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
                           }`}>
                             <p className="text-xs sm:text-sm leading-relaxed">{message.content}</p>
                           </div>
                           <div className={`flex items-center gap-1 sm:gap-2 mt-1 text-xs text-gray-500 dark:text-gray-400 ${
-                            message.user_id === user?.id ? 'justify-end' : 'justify-start'
+                            message.is_own ? 'justify-end' : 'justify-start'
                           }`}>
-                            <span className="truncate max-w-[100px] sm:max-w-none">{message.user_name}</span>
+                            <span className="truncate max-w-[100px] sm:max-w-none">{getDisplayName(message)}</span>
                             <span>•</span>
                             <span className="whitespace-nowrap">{formatTime(message.created_at)}</span>
-                            {message.user_id === user?.id && (
+                            {message.is_own && (
                               <CheckCheck className="w-3 h-3 text-blue-500 flex-shrink-0" />
                             )}
+                            <button
+                              type="button"
+                              onClick={() => toggleLike(message.id)}
+                              disabled={pendingLikes.has(message.id)}
+                              aria-pressed={message.liked_by_me}
+                              aria-label={message.liked_by_me ? 'Unlike message' : 'Like message'}
+                              className={`flex items-center gap-1 rounded px-1 transition-colors disabled:opacity-50 ${
+                                message.liked_by_me ? 'text-pink-500' : 'hover:text-pink-500'
+                              }`}
+                            >
+                              <Heart className={`w-3 h-3 ${message.liked_by_me ? 'fill-current' : ''}`} />
+                              {message.likes > 0 && <span>{message.likes}</span>}
+                            </button>
                           </div>
                         </div>
                       </div>

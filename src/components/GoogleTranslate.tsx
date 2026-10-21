@@ -75,8 +75,9 @@ const GoogleTranslate = () => {
     const scriptId = "google-translate-script";
 
     const hideGoogleBanner = () => {
-      document.body.style.top = "0px";
-      document.documentElement.style.top = "0px";
+      // Only write when needed so our own style changes don't re-trigger the observer
+      if (document.body.style.top !== "0px") document.body.style.top = "0px";
+      if (document.documentElement.style.top !== "0px") document.documentElement.style.top = "0px";
 
       const bannerSelectors = [
         ".goog-te-banner-frame",
@@ -90,6 +91,7 @@ const GoogleTranslate = () => {
 
       bannerSelectors.forEach((selector) => {
         document.querySelectorAll<HTMLElement>(selector).forEach((node) => {
+          if (node.style.display === "none") return;
           node.style.display = "none";
           node.style.visibility = "hidden";
           node.style.top = "0";
@@ -138,8 +140,17 @@ const GoogleTranslate = () => {
       window.setTimeout(hideGoogleBanner, 500);
     };
 
+    // Google injects its banner iframe / tooltip as direct children of <body> and
+    // shifts the page via inline `top` styles, so watching body's direct children
+    // and the style attribute is enough. Coalesce bursts of mutations into one
+    // check per animation frame.
+    let frameId: number | null = null;
     const observer = new MutationObserver(() => {
-      hideGoogleBanner();
+      if (frameId !== null) return;
+      frameId = window.requestAnimationFrame(() => {
+        frameId = null;
+        hideGoogleBanner();
+      });
     });
 
     observer.observe(document.documentElement, {
@@ -151,7 +162,6 @@ const GoogleTranslate = () => {
       attributes: true,
       attributeFilter: ["style"],
       childList: true,
-      subtree: true,
     });
 
     const existingScript = document.getElementById(scriptId);
@@ -180,6 +190,7 @@ const GoogleTranslate = () => {
 
     return () => {
       observer.disconnect();
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, []);

@@ -176,7 +176,7 @@ const EnhancedSignupForm: React.FC = () => {
     }
   };
 
-  const handleInputChange = (field: keyof FormData, value: any) => {
+  const handleInputChange = <K extends keyof FormData>(field: K, value: FormData[K]) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     if (errors[field]) {
       setErrors(prev => ({ ...prev, [field]: undefined }));

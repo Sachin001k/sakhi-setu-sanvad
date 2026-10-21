@@ -35,10 +35,9 @@ export const uploadAvatar = async (
       };
     }
 
-    // Generate unique filename
+    // Storage policies only allow writes inside the user's own folder
     const fileExt = file.name.split('.').pop();
-    const fileName = `${userId}-${Date.now()}.${fileExt}`;
-    const filePath = `avatars/${fileName}`;
+    const filePath = `${userId}/${Date.now()}.${fileExt}`;
 
     // Upload file to Supabase storage
     const { data, error } = await supabase.storage
@@ -79,11 +78,12 @@ export const uploadAvatar = async (
  */
 export const deleteAvatar = async (avatarUrl: string): Promise<boolean> => {
   try {
-    // Extract file path from URL
-    const url = new URL(avatarUrl);
-    const pathParts = url.pathname.split('/');
-    const fileName = pathParts[pathParts.length - 1];
-    const filePath = `avatars/${fileName}`;
+    // Public URLs look like .../storage/v1/object/public/avatars/<user id>/<file>
+    const marker = '/object/public/avatars/';
+    const { pathname } = new URL(avatarUrl);
+    const markerIndex = pathname.indexOf(marker);
+    if (markerIndex === -1) return false;
+    const filePath = decodeURIComponent(pathname.slice(markerIndex + marker.length));
 
     const { error } = await supabase.storage
       .from('avatars')
@@ -104,7 +104,9 @@ export const deleteAvatar = async (avatarUrl: string): Promise<boolean> => {
 /**
  * Get avatar URL from user profile
  */
-export const getAvatarUrl = (profile: any): string | null => {
+export const getAvatarUrl = (
+  profile: { avatar_url?: string | null; full_name?: string | null } | null | undefined
+): string | null => {
   if (profile?.avatar_url) {
     return profile.avatar_url;
   }
@@ -119,7 +121,7 @@ export const getAvatarUrl = (profile: any): string | null => {
       .slice(0, 2);
     
     // You can use a service like UI Avatars or create a default avatar
-    return `https://ui-avatars.com/api/?name=${initials}&background=random&color=fff&size=200`;
+    return `https://ui-avatars.com/api/?name=${encodeURIComponent(initials)}&background=random&color=fff&size=200`;
   }
   
   return null;
@@ -133,10 +135,15 @@ export const updateProfileAvatar = async (
   avatarUrl: string
 ): Promise<{ success: boolean; error?: string }> => {
   try {
+    // Upsert: the profile row may not exist yet for older accounts
     const { error } = await supabase
       .from('user_profiles')
-      .update({ avatar_url: avatarUrl })
-      .eq('user_id', userId);
+      .upsert({ user_id: userId, avatar_url: avatarUrl }, { onConflict: 'user_id' });
+
+    if (!error) {
+      // Keep users.avatar_url in sync so author avatars elsewhere match
+      await supabase.from('users').update({ avatar_url: avatarUrl }).eq('id', userId);
+    }
 
     if (error) {
       console.error('Profile update error:', error);

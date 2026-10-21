@@ -12,6 +12,8 @@ import ResponsiveHeader from '@/components/ResponsiveHeader';
 import ResponsiveFooter from '@/components/ResponsiveFooter';
 import { supabase } from '@/integrations/supabase/client';
 
+const SHOW_TESTIMONIALS = false;
+
 const LandingPage = () => {
   const navigate = useNavigate();
   const { user, loading } = useAuth();
@@ -484,7 +486,7 @@ const LandingPage = () => {
       </motion.section>
 
       {/* Testimonials Section - temporarily hidden */}
-      {false && (
+      {SHOW_TESTIMONIALS && (
         <motion.section
           id="testimonials"
           initial={{ opacity: 0, y: 50 }}

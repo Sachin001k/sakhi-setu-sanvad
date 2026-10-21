@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, Session } from '@supabase/supabase-js';
+import { User, Session, AuthError } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 
 interface UserProfile {
@@ -19,10 +19,10 @@ interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
-  signUp: (email: string, password: string, metadata: UserProfile) => Promise<{ data: any; error: any }>;
-  signIn: (email: string, password: string) => Promise<{ data: any; error: any }>;
+  signUp: (email: string, password: string, metadata: UserProfile) => Promise<{ data: { user: User | null; session: Session | null }; error: AuthError | null }>;
+  signIn: (email: string, password: string) => Promise<{ data: { user: User | null; session: Session | null }; error: AuthError | null }>;
   signOut: () => Promise<void>;
-  resetPassword: (email: string) => Promise<{ data: any; error: any }>;
+  resetPassword: (email: string) => Promise<{ data: object | null; error: AuthError | null }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -69,37 +69,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       },
     });
 
-    if (data.user) {
-      // Create user profile with all the provided information
-      await supabase.from('users').insert({
-        id: data.user.id,
-        email: data.user.email!,
-        full_name: metadata.full_name,
-        age: metadata.age,
-        location: metadata.location,
-        phone: metadata.phone,
-        emergency_contact: metadata.emergency_contact,
-        medical_conditions: metadata.medical_conditions || [],
-        current_medications: metadata.current_medications || [],
-        preferred_language: metadata.preferred_language || 'en',
-      });
-    }
-
+    // public.users and user_profiles rows are created from this metadata by
+    // the handle_new_user database trigger.
     return { data, error };
   };
 
   const signIn = async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
+    // onAuthStateChange updates user/session.
+    return supabase.auth.signInWithPassword({
       email,
       password,
     });
-    
-    if (!error && data.user) {
-      setUser(data.user);
-      setSession(data.session);
-    }
-    
-    return { data, error };
   };
 
   const signOut = async () => {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,18 +15,56 @@ import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import PDFReportGenerator from './PDFReportGenerator';
 import { useGemini } from '@/hooks/useGemini';
+import { createNotification } from '@/lib/notifications';
 
-interface HealthReport {
-  id: string;
-  report_type: string;
-  period_start: string;
-  period_end: string;
-  symptoms_summary: any;
-  recommendations: any;
-  insights: any;
-  file_url?: string;
-  created_at: string;
+interface SymptomRow {
+  symptom_type: string;
+  severity: number;
+  notes: string | null;
+  recorded_at: string;
 }
+
+type ReportTrend = 'improving' | 'worsening' | 'stable';
+
+// Clean AI response by removing markdown formatting
+const cleanAiResponse = (response: string) =>
+  response
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/#{1,6}\s*/g, '')
+    .replace(/- /g, '• ')
+    .replace(/\n\n+/g, '\n\n')
+    .replace(/\*\s/g, '• ')
+    .trim();
+
+/**
+ * Compare average severity of the earlier half of the period with the later
+ * half. Returns null when there is too little data to say anything honest.
+ */
+const computeTrend = (symptomsNewestFirst: SymptomRow[]): ReportTrend | null => {
+  if (symptomsNewestFirst.length < 4) return null;
+
+  const chronological = [...symptomsNewestFirst].reverse();
+  const mid = Math.floor(chronological.length / 2);
+  const average = (items: SymptomRow[]) =>
+    items.reduce((sum, s) => sum + (Number(s.severity) || 0), 0) / items.length;
+
+  const delta = average(chronological.slice(mid)) - average(chronological.slice(0, mid));
+  if (delta >= 1) return 'worsening';
+  if (delta <= -1) return 'improving';
+  return 'stable';
+};
+
+const mostCommonSymptoms = (symptoms: SymptomRow[], limit = 3) => {
+  const counts: Record<string, number> = {};
+  symptoms.forEach((s) => {
+    counts[s.symptom_type] = (counts[s.symptom_type] || 0) + 1;
+  });
+  return Object.entries(counts)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, limit)
+    .map(([symptom, count]) => ({ symptom, count }));
+};
 
 const HealthReports = () => {
   const { user } = useAuth();
@@ -34,91 +72,83 @@ const HealthReports = () => {
   const [aiReport, setAiReport] = useState<string>('');
   const [selectedPeriod, setSelectedPeriod] = useState<'weekly' | 'monthly'>('weekly');
   
-  const { generateHealthReport, isLoading: aiLoading } = useGemini({
-    onSuccess: (response) => {
-      // Clean AI response by removing markdown formatting
-      const cleanResponse = response
-        .replace(/\*\*(.*?)\*\*/g, '$1') // Remove bold markdown
-        .replace(/\*(.*?)\*/g, '$1') // Remove italic markdown
-        .replace(/#{1,6}\s*/g, '') // Remove headers
-        .replace(/- /g, '• ') // Convert dashes to bullets
-        .replace(/\n\n+/g, '\n\n') // Clean up multiple line breaks
-        .replace(/\*\s/g, '• ') // Convert asterisk lists to bullets
-        .trim();
-      
-      setAiReport(cleanResponse);
-      toast.success('AI wellness report generated successfully!');
-    },
-    onError: (error) => {
-      toast.error('Failed to generate AI report');
-    }
-  });
-
+  const { generateHealthReport, isLoading: aiLoading } = useGemini({ suppressToasts: true });
 
   const generateReport = async (type: 'weekly' | 'monthly') => {
     if (!user) return;
 
     setGenerating(true);
     try {
+      const periodStart = new Date(Date.now() - (type === 'weekly' ? 7 : 30) * 24 * 60 * 60 * 1000);
+
       // Fetch recent symptoms data
-      const { data: symptoms, error: symptomsError } = await supabase
+      const { data: symptomData, error: symptomsError } = await supabase
         .from('symptoms')
-        .select('*')
+        .select('symptom_type, severity, notes, recorded_at')
         .eq('user_id', user.id)
-        .gte('recorded_at', new Date(Date.now() - (type === 'weekly' ? 7 : 30) * 24 * 60 * 60 * 1000).toISOString())
+        .gte('recorded_at', periodStart.toISOString())
         .order('recorded_at', { ascending: false });
 
       if (symptomsError) throw symptomsError;
 
+      const symptoms: SymptomRow[] = symptomData ?? [];
+
+      const { data: profile, error: profileError } = await supabase
+        .from('users')
+        .select('age')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (profileError) {
+        console.error('Error fetching user age:', profileError);
+      }
+
+      const age = typeof profile?.age === 'number' ? profile.age : undefined;
+
       // Prepare wellness-focused data for AI
       const userData = {
-        symptoms: symptoms?.map((s: any) => s.symptom_type || s.description || 'Unknown symptom') || [],
-        lifestyle: symptoms?.map((s: any) => s.notes || 'No additional notes') || [],
-        concerns: symptoms?.filter((s: any) => s.severity > 5).map((s: any) => s.symptom_type || s.description) || [],
-        age: user.user_metadata?.age || 30,
-        reportType: type,
-        period: type === 'weekly' ? '7 days' : '30 days',
-        userName: user.user_metadata?.full_name || 'User'
+        symptoms: symptoms.map((s) => s.symptom_type || 'Unknown symptom'),
+        lifestyle: symptoms.map((s) => s.notes).filter((n): n is string => Boolean(n)),
+        concerns: symptoms.filter((s) => s.severity > 5).map((s) => s.symptom_type),
+        ...(age !== undefined ? { age } : {}),
       };
 
       // Generate AI report using Gemini
-      await generateHealthReport(userData);
+      const reportText = cleanAiResponse(await generateHealthReport(userData));
+      setAiReport(reportText);
 
       // Also create a database entry for tracking
       const reportData = {
         user_id: user.id,
         report_type: type,
-        period_start: new Date(Date.now() - (type === 'weekly' ? 7 : 30) * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        period_start: periodStart.toISOString().split('T')[0],
         period_end: new Date().toISOString().split('T')[0],
         symptoms_summary: {
-          total_entries: symptoms?.length || 0,
-          average_severity: symptoms?.length ? symptoms.reduce((sum, s: any) => sum + s.severity, 0) / symptoms.length : 0,
-          most_common_symptoms: [],
-          trends: 'stable'
+          total_entries: symptoms.length,
+          average_severity: symptoms.length
+            ? Math.round((symptoms.reduce((sum, s) => sum + s.severity, 0) / symptoms.length) * 10) / 10
+            : null,
+          most_common_symptoms: mostCommonSymptoms(symptoms),
+          trends: computeTrend(symptoms)
         },
-        recommendations: [],
-        insights: []
+        recommendations: { text: reportText },
+        insights: { text: reportText, source: 'gemini' }
       };
 
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('health_reports')
-        .insert([reportData] as any)
-        .select()
-        .single();
+        .insert(reportData);
 
       if (error) throw error;
 
       toast.success(`${type.charAt(0).toUpperCase() + type.slice(1)} report generated successfully!`);
 
-      // Create notification for report generation
-      if ((window as any).createNotification) {
-        (window as any).createNotification(
-          'Wellness Report Generated',
-          `Your ${type} wellness report has been generated successfully`,
-          'report',
-          '/profile?tab=reports'
-        );
-      }
+      void createNotification(
+        'Wellness Report Generated',
+        `Your ${type} wellness report has been generated successfully`,
+        'report',
+        '/profile?tab=reports'
+      );
     } catch (error) {
       console.error('Error generating report:', error);
       toast.error('Failed to generate health report');
@@ -126,10 +156,6 @@ const HealthReports = () => {
       setGenerating(false);
     }
   };
-
-
-
-
 
   return (
     <div className="space-y-6">

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { geminiModel, GeminiApiError } from '@/lib/gemini';
 import { toast } from 'sonner';
 
@@ -11,16 +11,21 @@ interface UseGeminiOptions {
 export const useGemini = (options?: UseGeminiOptions) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Callers usually pass an inline options object; keep the latest in a ref so
+  // the returned callbacks stay referentially stable across renders.
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
-  const handleGeminiError = useCallback((err: unknown, toastMessage: string, action: string) => {
+  const handleGeminiError = useCallback((err: unknown, toastMessage: string) => {
+    const opts = optionsRef.current;
     const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
     const isGeminiIssue = err instanceof GeminiApiError && typeof err.status === 'number' && err.status >= 400;
     setError(errorMessage);
-    options?.onError?.(err as Error);
-    if (!options?.suppressToasts && !isGeminiIssue) {
+    opts?.onError?.(err instanceof Error ? err : new Error(errorMessage));
+    if (!opts?.suppressToasts && !isGeminiIssue) {
       toast.error(toastMessage);
     }
-  }, [options]);
+  }, []);
 
   const generateContent = useCallback(async (
     prompt: string,
@@ -36,15 +41,15 @@ export const useGemini = (options?: UseGeminiOptions) => {
 
     try {
       const response = await geminiModel.generateContent(prompt, config);
-      options?.onSuccess?.(response);
+      optionsRef.current?.onSuccess?.(response);
       return response;
     } catch (err) {
-      handleGeminiError(err, 'Failed to generate content', 'Content generation');
+      handleGeminiError(err, 'Failed to generate content');
       throw err;
     } finally {
       setIsLoading(false);
     }
-  }, [handleGeminiError, options]);
+  }, [handleGeminiError]);
 
   const generateWellnessAdvice = useCallback(async (
     userInput: string,
@@ -59,15 +64,15 @@ export const useGemini = (options?: UseGeminiOptions) => {
 
     try {
       const response = await geminiModel.generateWellnessAdvice(userInput, context);
-      options?.onSuccess?.(response);
+      optionsRef.current?.onSuccess?.(response);
       return response;
     } catch (err) {
-      handleGeminiError(err, 'Failed to generate wellness advice', 'Wellness advice');
+      handleGeminiError(err, 'Failed to generate wellness advice');
       throw err;
     } finally {
       setIsLoading(false);
     }
-  }, [handleGeminiError, options]);
+  }, [handleGeminiError]);
 
   const analyzeSymptoms = useCallback(async (
     symptoms: string[],
@@ -78,15 +83,15 @@ export const useGemini = (options?: UseGeminiOptions) => {
 
     try {
       const response = await geminiModel.analyzeSymptoms(symptoms, additionalInfo);
-      options?.onSuccess?.(response);
+      optionsRef.current?.onSuccess?.(response);
       return response;
     } catch (err) {
-      handleGeminiError(err, 'Failed to analyze symptoms', 'Symptom analysis');
+      handleGeminiError(err, 'Failed to analyze symptoms');
       throw err;
     } finally {
       setIsLoading(false);
     }
-  }, [handleGeminiError, options]);
+  }, [handleGeminiError]);
 
   const generateMenopauseEducation = useCallback(async (
     topic: string,
@@ -97,15 +102,15 @@ export const useGemini = (options?: UseGeminiOptions) => {
 
     try {
       const response = await geminiModel.generateMenopauseEducation(topic, level);
-      options?.onSuccess?.(response);
+      optionsRef.current?.onSuccess?.(response);
       return response;
     } catch (err) {
-      handleGeminiError(err, 'Failed to generate educational content', 'Education content');
+      handleGeminiError(err, 'Failed to generate educational content');
       throw err;
     } finally {
       setIsLoading(false);
     }
-  }, [handleGeminiError, options]);
+  }, [handleGeminiError]);
 
   const generateHealthReport = useCallback(async (
     userData: {
@@ -120,15 +125,15 @@ export const useGemini = (options?: UseGeminiOptions) => {
 
     try {
       const response = await geminiModel.generateHealthReport(userData);
-      options?.onSuccess?.(response);
+      optionsRef.current?.onSuccess?.(response);
       return response;
     } catch (err) {
-      handleGeminiError(err, 'Failed to generate health report', 'Health report');
+      handleGeminiError(err, 'Failed to generate health report');
       throw err;
     } finally {
       setIsLoading(false);
     }
-  }, [handleGeminiError, options]);
+  }, [handleGeminiError]);
 
   const generateMotivation = useCallback(async (
     userMood: string,
@@ -139,15 +144,15 @@ export const useGemini = (options?: UseGeminiOptions) => {
 
     try {
       const response = await geminiModel.generateMotivation(userMood, goals);
-      options?.onSuccess?.(response);
+      optionsRef.current?.onSuccess?.(response);
       return response;
     } catch (err) {
-      handleGeminiError(err, 'Failed to generate motivation', 'Motivation');
+      handleGeminiError(err, 'Failed to generate motivation');
       throw err;
     } finally {
       setIsLoading(false);
     }
-  }, [handleGeminiError, options]);
+  }, [handleGeminiError]);
 
   const clearError = useCallback(() => {
     setError(null);

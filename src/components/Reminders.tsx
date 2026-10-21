@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { createNotification } from '@/lib/notifications';
 import { toast } from 'sonner';
 
 interface Reminder {
@@ -72,29 +73,35 @@ const Reminders = () => {
     { value: 7, label: 'Sunday' }
   ];
 
-  useEffect(() => {
-    if (user) {
-      fetchReminders();
-    }
-  }, [user]);
+  const fetchReminders = useCallback(async () => {
+    if (!user) return;
 
-  const fetchReminders = async () => {
     try {
       const { data, error } = await supabase
         .from('reminders')
         .select('*')
-        .eq('user_id', user?.id)
+        .eq('user_id', user.id)
         .order('scheduled_time', { ascending: true });
 
       if (error) throw error;
-      setReminders(data || []);
+      setReminders((data || []).map((r) => ({
+        ...r,
+        description: r.description ?? undefined,
+        days_of_week: r.days_of_week ?? [],
+        is_active: r.is_active ?? true,
+        created_at: r.created_at ?? ''
+      })));
     } catch (error) {
       console.error('Error fetching reminders:', error);
       toast.error('Failed to fetch reminders');
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
+
+  useEffect(() => {
+    fetchReminders();
+  }, [fetchReminders]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -110,38 +117,33 @@ const Reminders = () => {
         const { error } = await supabase
           .from('reminders')
           .update(reminderData)
-          .eq('id', editingReminder.id);
+          .eq('id', editingReminder.id)
+          .eq('user_id', user.id);
 
         if (error) throw error;
-        toast.success('Reminder updated successfully!');
+        toast.success('Reminder updated and saved.');
         
-        // Create notification for reminder update
-        if ((window as any).createNotification) {
-          (window as any).createNotification(
-            'Reminder Updated',
-            `"${formData.title}" reminder has been updated`,
-            'reminder',
-            '/profile?tab=reminders'
-          );
-        }
+        void createNotification(
+          'Reminder Updated',
+          `"${formData.title}" reminder has been updated`,
+          'reminder',
+          '/profile?tab=reminders'
+        );
       } else {
         const { error } = await supabase
           .from('reminders')
           .insert([reminderData]);
 
         if (error) throw error;
-        toast.success('Reminder created successfully!');
+        toast.success('Reminder saved.');
         
-        // Create notification for reminder creation
-        if ((window as any).createNotification) {
-          const reminderTypeLabel = reminderTypes.find(r => r.value === formData.reminder_type)?.label || formData.reminder_type;
-          (window as any).createNotification(
-            'Reminder Created',
-            `New ${reminderTypeLabel.toLowerCase()} reminder "${formData.title}" has been created`,
-            'reminder',
-            '/profile?tab=reminders'
-          );
-        }
+        const reminderTypeLabel = reminderTypes.find(r => r.value === formData.reminder_type)?.label || formData.reminder_type;
+        void createNotification(
+          'Reminder Saved',
+          `New ${reminderTypeLabel.toLowerCase()} reminder "${formData.title}" has been saved`,
+          'reminder',
+          '/profile?tab=reminders'
+        );
       }
 
       await fetchReminders();
@@ -171,7 +173,8 @@ const Reminders = () => {
       const { error } = await supabase
         .from('reminders')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .eq('user_id', user?.id ?? '');
 
       if (error) throw error;
       toast.success('Reminder deleted successfully!');
@@ -187,7 +190,8 @@ const Reminders = () => {
       const { error } = await supabase
         .from('reminders')
         .update({ is_active: !isActive })
-        .eq('id', id);
+        .eq('id', id)
+        .eq('user_id', user?.id ?? '');
 
       if (error) throw error;
       await fetchReminders();
@@ -261,7 +265,7 @@ const Reminders = () => {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Reminders</h2>
-          <p className="text-gray-600">Stay on track with your wellness goals</p>
+          <p className="text-gray-600">Keep a saved list of your wellness routines</p>
         </div>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
@@ -276,7 +280,7 @@ const Reminders = () => {
                 {editingReminder ? 'Edit Reminder' : 'Add New Reminder'}
               </DialogTitle>
               <DialogDescription>
-                Set up reminders to help you stay consistent with your wellness routine.
+                Save reminders for your wellness routine. They are saved to your list here; the app does not send alerts for them yet.
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -382,7 +386,7 @@ const Reminders = () => {
             <Bell className="w-16 h-16 mx-auto mb-4 text-gray-400" />
             <h3 className="text-lg font-semibold mb-2">No Reminders Yet</h3>
             <p className="text-gray-600 mb-4">
-              Create your first reminder to stay on track with your wellness goals
+              Save your first reminder to keep track of your wellness routine
             </p>
             <Button onClick={() => setIsDialogOpen(true)}>
               <Plus className="w-4 h-4 mr-2" />

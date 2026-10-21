@@ -31,7 +31,7 @@ interface PHC {
   pincode: string;
   phone: string;
   email: string;
-  services: string[];
+  services: string[] | null;
   latitude: number;
   longitude: number;
   is_active: boolean;
@@ -82,22 +82,23 @@ const PHCDirectory = () => {
   };
 
   const filteredPHCs = phcs.filter(phc => {
-    const matchesSearch = phc.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         phc.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         phc.city.toLowerCase().includes(searchTerm.toLowerCase());
+    const term = searchTerm.toLowerCase();
+    const matchesSearch = (phc.name ?? '').toLowerCase().includes(term) ||
+                         (phc.address ?? '').toLowerCase().includes(term) ||
+                         (phc.city ?? '').toLowerCase().includes(term);
     
     const matchesCity = selectedCity === 'all' || phc.city === selectedCity;
-    const matchesService = selectedService === 'all' || phc.services.includes(selectedService);
+    const matchesService = selectedService === 'all' || (phc.services ?? []).includes(selectedService);
     
     return matchesSearch && matchesCity && matchesService;
   });
 
-  const cities = Array.from(new Set(phcs.map(phc => phc.city))).sort();
+  const cities = Array.from(new Set(phcs.map(phc => phc.city).filter(Boolean))).sort();
 
   const getDirections = (phc: PHC) => {
     if (phc.latitude && phc.longitude) {
       const url = `https://www.google.com/maps/dir/?api=1&destination=${phc.latitude},${phc.longitude}`;
-      window.open(url, '_blank');
+      window.open(url, '_blank', 'noopener,noreferrer');
     } else {
       toast.info('Directions not available for this location');
     }
@@ -210,11 +211,15 @@ const PHCDirectory = () => {
                     <div>
                       <h4 className="font-medium mb-2">Available Services</h4>
                       <div className="flex flex-wrap gap-2">
-                        {phc.services.map((service, index) => (
-                          <Badge key={index} variant="secondary" className="text-xs">
-                            {service}
-                          </Badge>
-                        ))}
+                        {(phc.services ?? []).length > 0 ? (
+                          (phc.services ?? []).map((service, index) => (
+                            <Badge key={index} variant="secondary" className="text-xs">
+                              {service}
+                            </Badge>
+                          ))
+                        ) : (
+                          <span className="text-sm text-muted-foreground">Not listed</span>
+                        )}
                       </div>
                     </div>
 

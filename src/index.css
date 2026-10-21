@@ -129,20 +129,6 @@ html {
     box-shadow: var(--shadow-glow);
   }
 
-  .bg-[#1f2937] {
-    color: #fff !important;
-  }
-
-  .bg-[#1f2937] * {
-    color: inherit !important;
-  }
-
-  .bg-[#1f2937] svg,
-  .bg-[#1f2937] svg * {
-    stroke: currentColor !important;
-    fill: currentColor !important;
-  }
-
   .animate-float {
     animation: float 6s ease-in-out infinite;
   }

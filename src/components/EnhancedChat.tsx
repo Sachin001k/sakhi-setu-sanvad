@@ -2,7 +2,7 @@ import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -23,7 +23,7 @@ import {
   Heart,
   Share2
 } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -36,11 +36,25 @@ interface ChatMessage {
   room_id: string | null;
   reply_to: string | null;
   created_at: string;
-  user?: {
-    full_name: string;
-    avatar_url?: string;
-  };
+  author_name: string | null;
+  author_avatar_url: string | null;
 }
+
+const MESSAGE_COLUMNS = 'id, user_id, content, message_type, room_id, reply_to, created_at, author_name, author_avatar_url';
+
+const fetchMessageById = async (id: string): Promise<ChatMessage | null> => {
+  const { data, error } = await supabase
+    .from('chat_messages_public')
+    .select(MESSAGE_COLUMNS)
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Error fetching message:', error);
+    return null;
+  }
+  return (data as ChatMessage | null) ?? null;
+};
 
 interface ChatRoom {
   id: string;
@@ -62,27 +76,33 @@ const EnhancedChat = () => {
   const [loading, setLoading] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  // The room whose messages are currently wanted; responses for any other
+  // room are stale and get dropped.
+  const activeRoomRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    fetchRooms();
-    fetchMessages();
+  const appendMessage = useCallback((message: ChatMessage) => {
+    if (message.room_id !== activeRoomRef.current) return;
+    setMessages(prev => (prev.some(m => m.id === message.id) ? prev : [...prev, message]));
   }, []);
 
-  useEffect(() => {
-    if (activeRoom) {
-      fetchMessages(activeRoom);
+  const fetchMessages = useCallback(async (roomId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('chat_messages_public')
+        .select(MESSAGE_COLUMNS)
+        .eq('room_id', roomId)
+        .order('created_at', { ascending: true });
+
+      if (activeRoomRef.current !== roomId) return;
+      if (error) throw error;
+      setMessages((data as ChatMessage[] | null) ?? []);
+    } catch (error) {
+      console.error('Error fetching messages:', error);
+      toast.error('Failed to load messages');
     }
-  }, [activeRoom]);
+  }, []);
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
-  const fetchRooms = async () => {
+  const fetchRooms = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('chat_rooms')
@@ -92,46 +112,64 @@ const EnhancedChat = () => {
 
       if (error) throw error;
       setRooms(data || []);
-      if (data && data.length > 0 && !activeRoom) {
-        setActiveRoom(data[0].id);
+      if (data && data.length > 0) {
+        setActiveRoom(current => current ?? data[0].id);
       }
     } catch (error) {
       console.error('Error fetching rooms:', error);
-    }
-  };
-
-  const fetchMessages = async (roomId?: string) => {
-    try {
-      const query = supabase
-        .from('chat_messages')
-        .select(`
-          *,
-          user:users(full_name, avatar_url)
-        `)
-        .order('created_at', { ascending: true });
-
-      if (roomId) {
-        query.eq('room_id', roomId);
-      } else {
-        query.is('room_id', null);
-      }
-
-      const { data, error } = await query;
-
-      if (error) throw error;
-      setMessages(data || []);
-    } catch (error) {
-      console.error('Error fetching messages:', error);
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    fetchRooms();
+  }, [fetchRooms]);
+
+  useEffect(() => {
+    activeRoomRef.current = activeRoom;
+    setMessages([]);
+    if (!activeRoom) return;
+
+    fetchMessages(activeRoom);
+
+    const channel = supabase
+      .channel(`chat-room-${activeRoom}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'chat_messages',
+          filter: `room_id=eq.${activeRoom}`
+        },
+        async (payload) => {
+          const id = (payload.new as { id?: string }).id;
+          if (!id) return;
+          const message = await fetchMessageById(id);
+          if (message) appendMessage(message);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeRoom, fetchMessages, appendMessage]);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
   const sendMessage = async () => {
-    if (!newMessage.trim() || !user) return;
+    if (!newMessage.trim() || !user || !activeRoom) return;
 
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('chat_messages')
         .insert({
           user_id: user.id,
@@ -139,13 +177,18 @@ const EnhancedChat = () => {
           message_type: 'text',
           room_id: activeRoom,
           reply_to: replyingTo
-        });
+        })
+        .select('id')
+        .single();
 
       if (error) throw error;
 
       setNewMessage("");
       setReplyingTo(null);
-      fetchMessages(activeRoom || undefined);
+      if (data?.id) {
+        const message = await fetchMessageById(data.id);
+        if (message) appendMessage(message);
+      }
     } catch (error) {
       console.error('Error sending message:', error);
       toast.error('Failed to send message');
@@ -342,8 +385,11 @@ const EnhancedChat = () => {
                     }`}
                   >
                     <Avatar className="w-8 h-8">
+                      {message.author_avatar_url && (
+                        <AvatarImage src={message.author_avatar_url} alt={message.author_name || 'Community member'} />
+                      )}
                       <AvatarFallback className="text-xs">
-                        {getInitials(message.user?.full_name || 'U')}
+                        {getInitials(message.author_name || 'Community member')}
                       </AvatarFallback>
                     </Avatar>
                     <div className={`flex-1 max-w-[70%] ${
@@ -356,6 +402,11 @@ const EnhancedChat = () => {
                       }`}>
                         <p className="text-sm">{message.content}</p>
                         <div className="flex items-center gap-2 mt-1">
+                          {message.user_id !== user?.id && (
+                            <span className="text-xs font-medium opacity-80">
+                              {message.author_name || 'Community member'}
+                            </span>
+                          )}
                           <span className="text-xs opacity-70">
                             {formatTime(message.created_at)}
                           </span>

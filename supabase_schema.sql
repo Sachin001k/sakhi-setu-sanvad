@@ -267,6 +267,12 @@ ALTER TABLE public.video_library ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_rooms ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.contact_messages ENABLE ROW LEVEL SECURITY;
+
+-- Policies: contact messages (submit only, never readable through the API)
+DROP POLICY IF EXISTS "Anyone can submit contact messages" ON public.contact_messages;
+CREATE POLICY "Anyone can submit contact messages" ON public.contact_messages
+  FOR INSERT TO anon, authenticated WITH CHECK (true);
 
 -- Policies: users
 DROP POLICY IF EXISTS "Users can view own profile" ON public.users;
@@ -300,11 +306,13 @@ CREATE POLICY "Anyone can view wellness tips" ON public.wellness_tips
 
 -- Policies: community posts
 DROP POLICY IF EXISTS "Anyone can view community posts" ON public.community_posts;
+DROP POLICY IF EXISTS "Users can view own community posts" ON public.community_posts;
 DROP POLICY IF EXISTS "Users can insert community posts" ON public.community_posts;
 DROP POLICY IF EXISTS "Users can update own community posts" ON public.community_posts;
 DROP POLICY IF EXISTS "Users can delete own community posts" ON public.community_posts;
-CREATE POLICY "Anyone can view community posts" ON public.community_posts
-  FOR SELECT USING (true);
+-- Owner-only; everyone else reads the community_posts_public view (see migrations)
+CREATE POLICY "Users can view own community posts" ON public.community_posts
+  FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Users can insert community posts" ON public.community_posts
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Users can update own community posts" ON public.community_posts
@@ -348,9 +356,9 @@ CREATE POLICY "Anyone can view PHC directory" ON public.phc_directory
 DROP POLICY IF EXISTS "Users can view own chatbot conversations" ON public.chatbot_conversations;
 DROP POLICY IF EXISTS "Users can insert chatbot conversations" ON public.chatbot_conversations;
 CREATE POLICY "Users can view own chatbot conversations" ON public.chatbot_conversations
-  FOR SELECT USING (auth.uid() = user_id OR user_id IS NULL);
+  FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Users can insert chatbot conversations" ON public.chatbot_conversations
-  FOR INSERT WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
 
 -- Policies: voice notes
 DROP POLICY IF EXISTS "Users can view own voice notes" ON public.voice_notes;
@@ -397,7 +405,7 @@ DROP POLICY IF EXISTS "Users can insert their own videos" ON public.video_librar
 DROP POLICY IF EXISTS "Users can update their own videos" ON public.video_library;
 DROP POLICY IF EXISTS "Users can delete their own videos" ON public.video_library;
 CREATE POLICY "Public videos are viewable by everyone" ON public.video_library
-  FOR SELECT USING (is_public = true);
+  FOR SELECT USING (is_public = true OR auth.uid() = user_id);
 CREATE POLICY "Users can insert their own videos" ON public.video_library
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Users can update their own videos" ON public.video_library
@@ -437,11 +445,13 @@ CREATE POLICY "Users can delete their own messages" ON public.chat_messages
 
 -- Policies: user profiles
 DROP POLICY IF EXISTS "Users can view all profiles" ON public.user_profiles;
+DROP POLICY IF EXISTS "Users can view own profile row" ON public.user_profiles;
 DROP POLICY IF EXISTS "Users can insert their own profile" ON public.user_profiles;
 DROP POLICY IF EXISTS "Users can update their own profile" ON public.user_profiles;
 DROP POLICY IF EXISTS "Users can delete their own profile" ON public.user_profiles;
-CREATE POLICY "Users can view all profiles" ON public.user_profiles
-  FOR SELECT USING (true);
+-- Owner-only; names/avatars for others come from the public_profiles view
+CREATE POLICY "Users can view own profile row" ON public.user_profiles
+  FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Users can insert their own profile" ON public.user_profiles
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Users can update their own profile" ON public.user_profiles
@@ -469,42 +479,55 @@ CREATE TRIGGER update_user_profiles_updated_at
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  meta JSONB := COALESCE(NEW.raw_user_meta_data, '{}'::jsonb);
 BEGIN
-  INSERT INTO public.users (id, email, full_name, preferred_language)
-  VALUES (NEW.id, NEW.email, NEW.raw_user_meta_data->>'full_name', 'en')
+  INSERT INTO public.users (
+    id, email, full_name, preferred_language, age, location, phone,
+    emergency_contact, medical_conditions, current_medications
+  )
+  VALUES (
+    NEW.id,
+    NEW.email,
+    meta->>'full_name',
+    COALESCE(NULLIF(meta->>'preferred_language', ''), 'en'),
+    CASE WHEN meta->>'age' ~ '^\d{1,3}$' THEN (meta->>'age')::INTEGER END,
+    NULLIF(meta->>'location', ''),
+    NULLIF(meta->>'phone', ''),
+    NULLIF(meta->>'emergency_contact', ''),
+    CASE WHEN jsonb_typeof(meta->'medical_conditions') = 'array'
+      THEN ARRAY(SELECT jsonb_array_elements_text(meta->'medical_conditions'))
+      ELSE '{}'::TEXT[] END,
+    CASE WHEN jsonb_typeof(meta->'current_medications') = 'array'
+      THEN ARRAY(SELECT jsonb_array_elements_text(meta->'current_medications'))
+      ELSE '{}'::TEXT[] END
+  )
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.user_profiles (user_id, bio, location, website, social_links, interests, privacy_settings, profile_views, avatar_url)
-  VALUES (NEW.id, '', '', '', '{}', '{}', '{}', 0, NULL)
+  VALUES (NEW.id, '', COALESCE(NULLIF(meta->>'location', ''), ''), '', '{}', '{}', '{}', 0, NULL)
   ON CONFLICT (user_id) DO NOTHING;
+
+  INSERT INTO public.notifications (user_id, title, message, type)
+  VALUES (NEW.id, 'Welcome to MyMenoSakhi!', 'Start tracking your symptoms to get personalized insights.', 'tip');
 
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
-CREATE OR REPLACE FUNCTION public.update_user_avatar_url()
-RETURNS TRIGGER AS $$
-BEGIN
-  UPDATE public.user_profiles
-  SET avatar_url = NEW.name,
-      updated_at = NOW()
-  WHERE user_id = auth.uid();
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
+-- Avatar URLs are written by the app; no storage trigger
 DROP TRIGGER IF EXISTS on_avatar_upload ON storage.objects;
-CREATE TRIGGER on_avatar_upload
-  AFTER INSERT ON storage.objects
-  FOR EACH ROW
-  WHEN (NEW.bucket_id = 'avatars')
-  EXECUTE FUNCTION public.update_user_avatar_url();
+DROP FUNCTION IF EXISTS public.update_user_avatar_url();
 
 -- Storage buckets
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
@@ -532,11 +555,15 @@ DROP POLICY IF EXISTS "Users can delete their own avatar" ON storage.objects;
 CREATE POLICY "Avatar images are publicly accessible" ON storage.objects
   FOR SELECT USING (bucket_id = 'avatars');
 CREATE POLICY "Users can upload their own avatar" ON storage.objects
-  FOR INSERT TO authenticated, anon WITH CHECK (bucket_id = 'avatars');
+  FOR INSERT TO authenticated
+  WITH CHECK (bucket_id = 'avatars' AND (storage.foldername(name))[1] = auth.uid()::text);
 CREATE POLICY "Users can update their own avatar" ON storage.objects
-  FOR UPDATE TO authenticated, anon USING (bucket_id = 'avatars') WITH CHECK (bucket_id = 'avatars');
+  FOR UPDATE TO authenticated
+  USING (bucket_id = 'avatars' AND (storage.foldername(name))[1] = auth.uid()::text)
+  WITH CHECK (bucket_id = 'avatars' AND (storage.foldername(name))[1] = auth.uid()::text);
 CREATE POLICY "Users can delete their own avatar" ON storage.objects
-  FOR DELETE TO authenticated, anon USING (bucket_id = 'avatars');
+  FOR DELETE TO authenticated
+  USING (bucket_id = 'avatars' AND (storage.foldername(name))[1] = auth.uid()::text);
 
 -- Storage policies for video thumbnails
 DROP POLICY IF EXISTS "Video thumbnails are publicly accessible" ON storage.objects;
@@ -546,11 +573,15 @@ DROP POLICY IF EXISTS "Users can delete video thumbnails" ON storage.objects;
 CREATE POLICY "Video thumbnails are publicly accessible" ON storage.objects
   FOR SELECT USING (bucket_id = 'video-thumbnails');
 CREATE POLICY "Users can upload video thumbnails" ON storage.objects
-  FOR INSERT TO authenticated, anon WITH CHECK (bucket_id = 'video-thumbnails');
+  FOR INSERT TO authenticated
+  WITH CHECK (bucket_id = 'video-thumbnails' AND (storage.foldername(name))[1] = auth.uid()::text);
 CREATE POLICY "Users can update video thumbnails" ON storage.objects
-  FOR UPDATE TO authenticated, anon USING (bucket_id = 'video-thumbnails') WITH CHECK (bucket_id = 'video-thumbnails');
+  FOR UPDATE TO authenticated
+  USING (bucket_id = 'video-thumbnails' AND (storage.foldername(name))[1] = auth.uid()::text)
+  WITH CHECK (bucket_id = 'video-thumbnails' AND (storage.foldername(name))[1] = auth.uid()::text);
 CREATE POLICY "Users can delete video thumbnails" ON storage.objects
-  FOR DELETE TO authenticated, anon USING (bucket_id = 'video-thumbnails');
+  FOR DELETE TO authenticated
+  USING (bucket_id = 'video-thumbnails' AND (storage.foldername(name))[1] = auth.uid()::text);
 
 -- Seed minimal content
 INSERT INTO public.wellness_tips (title, content, category, language)
@@ -564,17 +595,7 @@ WHERE NOT EXISTS (
   SELECT 1 FROM public.wellness_tips WHERE title = 'Hydration Tips' AND language = 'en'
 );
 
-INSERT INTO public.resources (title, description, type, url, language, category, duration_minutes)
-SELECT 'Yoga for Menopause Relief', 'A comprehensive 30-minute yoga session designed specifically for women experiencing menopause symptoms.', 'video', 'https://www.youtube.com/watch?v=example1', 'en', 'exercise', 30
-WHERE NOT EXISTS (
-  SELECT 1 FROM public.resources WHERE title = 'Yoga for Menopause Relief'
-);
-INSERT INTO public.resources (title, description, type, url, language, category, duration_minutes)
-SELECT 'Nutritional Guidelines', 'Essential dietary recommendations to support your body during menopause transition.', 'article', 'https://example.com/nutrition-guide', 'en', 'nutrition', 5
-WHERE NOT EXISTS (
-  SELECT 1 FROM public.resources WHERE title = 'Nutritional Guidelines'
-);
-
+-- NOTE: sample PHC rows with placeholder phone numbers; replace with real centres.
 INSERT INTO public.phc_directory (name, address, city, state, pincode, phone, services)
 SELECT 'Primary Health Center - Pune', '123 Main Street, Pune', 'Pune', 'Maharashtra', '411001', '+91-20-12345678', ARRAY['General Medicine', 'Gynecology', 'Mental Health']
 WHERE NOT EXISTS (
@@ -612,11 +633,15 @@ BEGIN
   END IF;
 END $$;
 
--- Grants
+-- Grants: logged-out visitors get only what the landing page needs.
+-- RLS still applies on top of these. Views/functions/grants for community and
+-- chat live in supabase/migrations/20261021000000_security_and_data_fixes.sql.
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
-GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated;
-GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;
-GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO anon, authenticated;
-GRANT USAGE ON SCHEMA storage TO authenticated;
-GRANT ALL ON storage.objects TO authenticated;
-GRANT ALL ON storage.buckets TO authenticated;
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM anon;
+GRANT SELECT ON public.wellness_tips, public.resources, public.phc_directory TO anon;
+GRANT INSERT ON public.contact_messages TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
+REVOKE ALL ON public.contact_messages FROM authenticated;
+GRANT INSERT ON public.contact_messages TO authenticated;

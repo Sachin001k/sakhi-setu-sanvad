@@ -13,6 +13,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useGemini } from '@/hooks/useGemini';
+import { createNotification } from '@/lib/notifications';
 import { toast } from 'sonner';
 import { 
   Calendar, 
@@ -137,9 +138,50 @@ const resolveSpeechLanguageCode = (language?: string) => {
   return `${normalized}-${normalized === 'en' ? 'US' : 'IN'}`;
 };
 
+interface SymptomEntry {
+  id: string;
+  symptom_type: string;
+  severity: number;
+  notes: string | null;
+  recorded_at: string;
+  created_at?: string | null;
+}
+
+type SymptomTrend = 'improving' | 'worsening' | 'stable' | 'insufficient';
+
+const TREND_WINDOW = 5;
+const TREND_THRESHOLD = 1;
+
+const trendLabels: Record<SymptomTrend, string> = {
+  improving: 'Improving',
+  worsening: 'Worsening',
+  stable: 'Stable',
+  insufficient: 'Not enough data'
+};
+
+/**
+ * Compare the average severity of the most recent entries against the
+ * entries immediately before them. Expects entries newest-first.
+ */
+const calculateTrend = (entriesNewestFirst: SymptomEntry[]): SymptomTrend => {
+  const windowSize = Math.min(TREND_WINDOW, Math.floor(entriesNewestFirst.length / 2));
+  if (windowSize < 2) return 'insufficient';
+
+  const average = (items: SymptomEntry[]) =>
+    items.reduce((sum, s) => sum + (Number(s.severity) || 0), 0) / items.length;
+
+  const recentAverage = average(entriesNewestFirst.slice(0, windowSize));
+  const previousAverage = average(entriesNewestFirst.slice(windowSize, windowSize * 2));
+  const delta = recentAverage - previousAverage;
+
+  if (delta >= TREND_THRESHOLD) return 'worsening';
+  if (delta <= -TREND_THRESHOLD) return 'improving';
+  return 'stable';
+};
+
 export const SymptomTracker: React.FC = () => {
   const { user } = useAuth();
-  const [symptoms, setSymptoms] = useState<any[]>([]);
+  const [symptoms, setSymptoms] = useState<SymptomEntry[]>([]);
   const [selectedSymptom, setSelectedSymptom] = useState('');
   const [severity, setSeverity] = useState([5]);
   const [notes, setNotes] = useState('');
@@ -149,11 +191,16 @@ export const SymptomTracker: React.FC = () => {
   const [aiQuery, setAiQuery] = useState('');
   const [aiResponse, setAiResponse] = useState('');
   const [showAiChat, setShowAiChat] = useState(false);
-  const [stats, setStats] = useState({
+  const [stats, setStats] = useState<{
+    totalEntries: number;
+    averageSeverity: number;
+    mostCommonSymptom: string;
+    recentTrend: SymptomTrend;
+  }>({
     totalEntries: 0,
     averageSeverity: 0,
     mostCommonSymptom: '',
-    recentTrend: 'stable'
+    recentTrend: 'insufficient'
   });
   const [preferredLanguage, setPreferredLanguage] = useState<string>(() => {
     return (user?.user_metadata?.preferred_language as string) || 'en';
@@ -191,21 +238,12 @@ export const SymptomTracker: React.FC = () => {
           .from('users')
           .select('preferred_language')
           .eq('id', user.id)
-          .single();
+          .maybeSingle();
 
-        if (!userError && userData?.preferred_language) {
+        if (userError) throw userError;
+
+        if (userData?.preferred_language) {
           setPreferredLanguage(userData.preferred_language);
-          return;
-        }
-
-        const { data: profileData, error: profileError } = await supabase
-          .from('user_profiles')
-          .select('preferred_language')
-          .eq('user_id', user.id)
-          .single();
-
-        if (!profileError && profileData?.preferred_language) {
-          setPreferredLanguage(profileData.preferred_language);
         }
       } catch (error) {
         console.error('Error fetching preferred language:', error);
@@ -260,14 +298,14 @@ export const SymptomTracker: React.FC = () => {
     }
   };
 
-  const calculateStats = (symptomData: any[]) => {
+  const calculateStats = (symptomData: SymptomEntry[]) => {
     if (symptomData.length === 0) {
       // Set empty stats for new users - no premade data
       setStats({
         totalEntries: 0,
         averageSeverity: 0,
         mostCommonSymptom: '',
-        recentTrend: 'stable'
+        recentTrend: 'insufficient'
       });
       return;
     }
@@ -283,25 +321,7 @@ export const SymptomTracker: React.FC = () => {
     const mostCommonSymptom = Object.entries(symptomCounts)
       .sort(([,a], [,b]) => b - a)[0]?.[0] || '';
 
-    // Calculate trend based on overall average severity (not comparing recent vs older)
-    // Take every log's severity, calculate overall average, then categorize
-    let recentTrend = 'stable';
-    
-    if (symptomData.length > 0) {
-      // Calculate overall average of all symptom severities
-      const overallAverage = averageSeverity; // Already calculated above
-      
-      // Categorize based on average severity range (1-10 scale)
-      if (overallAverage < 2) {
-        recentTrend = 'stable';
-      } else if (overallAverage >= 2 && overallAverage < 5) {
-        recentTrend = 'moderate';
-      } else if (overallAverage >= 5 && overallAverage < 7.5) {
-        recentTrend = 'severe';
-      } else if (overallAverage >= 7.5) {
-        recentTrend = 'worsening';
-      }
-    }
+    const recentTrend = calculateTrend(symptomData);
 
     setStats({
       totalEntries,
@@ -350,7 +370,7 @@ export const SymptomTracker: React.FC = () => {
           severity: severity[0],
           notes: combinedNotes || null,
           recorded_at: new Date().toISOString(),
-        } as any);
+        });
 
       if (error) {
         if (error.code === 'PGRST205') {
@@ -366,15 +386,13 @@ export const SymptomTracker: React.FC = () => {
       });
 
       // Create notification for symptom logging
-      if ((window as any).createNotification) {
-        const symptomLabel = symptomTypes.find(s => s.value === selectedSymptom)?.label || selectedSymptom;
-        (window as any).createNotification(
-          'Symptom Tracked',
-          `${symptomLabel} (Severity: ${severity[0]}/10) recorded successfully`,
-          'symptom',
-          '/tracker'
-        );
-      }
+      const symptomLabel = symptomTypes.find(s => s.value === selectedSymptom)?.label || selectedSymptom;
+      void createNotification(
+        'Symptom Tracked',
+        `${symptomLabel} (Severity: ${severity[0]}/10) recorded successfully`,
+        'symptom',
+        '/tracker'
+      );
 
       setSelectedSymptom('');
       setSeverity([5]);
@@ -479,22 +497,20 @@ export const SymptomTracker: React.FC = () => {
     return 'text-red-800 bg-red-200';
   };
 
-  const getTrendIcon = (trend: string) => {
+  const getTrendIcon = (trend: SymptomTrend) => {
     switch (trend) {
       case 'improving': return <TrendingUp className="w-4 h-4 text-green-500" />;
       case 'worsening': return <TrendingUp className="w-4 h-4 text-red-500 rotate-180" />;
-      case 'severe': return <TrendingUp className="w-4 h-4 text-orange-500 rotate-180" />;
-      case 'moderate': return <Activity className="w-4 h-4 text-yellow-500" />;
+      case 'insufficient': return <Activity className="w-4 h-4 text-gray-400" />;
       default: return <Activity className="w-4 h-4 text-blue-500" />;
     }
   };
 
-  const getTrendColor = (trend: string) => {
+  const getTrendColor = (trend: SymptomTrend) => {
     switch (trend) {
       case 'improving': return 'text-green-600';
       case 'worsening': return 'text-red-600';
-      case 'severe': return 'text-orange-600';
-      case 'moderate': return 'text-yellow-600';
+      case 'insufficient': return 'text-gray-500';
       default: return 'text-blue-600';
     }
   };
@@ -723,7 +739,6 @@ IMPORTANT: Provide recommendations based ONLY on the symptoms and their severity
         </Button>
         <Button
           onClick={() => {
-            console.log('Ask AI button clicked, current showAiChat:', showAiChat);
             setShowAiChat(!showAiChat);
           }}
           variant="outline"
@@ -885,7 +900,7 @@ IMPORTANT: Provide recommendations based ONLY on the symptoms and their severity
               {getTrendIcon(stats.recentTrend)}
             </div>
             <div className={`text-sm sm:text-lg font-bold ${getTrendColor(stats.recentTrend)} capitalize`}>
-              {stats.recentTrend}
+              {trendLabels[stats.recentTrend]}
             </div>
             <div className="text-xs sm:text-sm text-gray-600">Recent Trend</div>
           </CardContent>

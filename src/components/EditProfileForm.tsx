@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -19,6 +19,7 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { createNotification } from '@/lib/notifications';
 
 interface UserProfile {
   full_name: string;
@@ -34,7 +35,7 @@ interface UserProfile {
 }
 
 interface EditProfileFormProps {
-  userProfile?: any;
+  userProfile?: Partial<UserProfile> | null;
   onProfileUpdate?: () => void;
 }
 
@@ -67,28 +68,7 @@ export const EditProfileForm: React.FC<EditProfileFormProps> = ({ userProfile: p
     'Osteoporosis', 'Depression', 'Anxiety', 'Migraine', 'Asthma', 'Other'
   ];
 
-  useEffect(() => {
-    if (propUserProfile) {
-      // Use prop data if available
-      setProfile({
-        full_name: (propUserProfile as any).full_name || '',
-        age: (propUserProfile as any).age || undefined,
-        location: (propUserProfile as any).location || '',
-        phone: (propUserProfile as any).phone || '',
-        emergency_contact: (propUserProfile as any).emergency_contact || '',
-        medical_conditions: (propUserProfile as any).medical_conditions || [],
-        current_medications: (propUserProfile as any).current_medications || [],
-        preferred_language: (propUserProfile as any).preferred_language || 'en',
-        avatar_url: (propUserProfile as any).avatar_url || '',
-        bio: (propUserProfile as any).bio || ''
-      });
-      setLoading(false);
-    } else if (user) {
-      fetchProfile();
-    }
-  }, [user, propUserProfile]);
-
-  const fetchProfile = async () => {
+  const fetchProfile = useCallback(async () => {
     if (!user) return;
     
     try {
@@ -104,7 +84,7 @@ export const EditProfileForm: React.FC<EditProfileFormProps> = ({ userProfile: p
           .from('user_profiles')
           .select('*')
           .eq('user_id', user.id)
-          .single()
+          .maybeSingle()
       ]);
 
       if (usersResult.error) throw usersResult.error;
@@ -114,16 +94,16 @@ export const EditProfileForm: React.FC<EditProfileFormProps> = ({ userProfile: p
 
       if (userData) {
         setProfile({
-          full_name: (userData as any).full_name || '',
-          age: (userData as any).age || undefined,
-          location: (userData as any).location || '',
-          phone: (userData as any).phone || '',
-          emergency_contact: (userData as any).emergency_contact || '',
-          medical_conditions: (userData as any).medical_conditions || [],
-          current_medications: (userData as any).current_medications || [],
-          preferred_language: (userData as any).preferred_language || 'en',
-          avatar_url: (userData as any).avatar_url || '',
-          bio: (profileData as any)?.bio || ''
+          full_name: userData.full_name || '',
+          age: userData.age ?? undefined,
+          location: userData.location || '',
+          phone: userData.phone || '',
+          emergency_contact: userData.emergency_contact || '',
+          medical_conditions: userData.medical_conditions || [],
+          current_medications: userData.current_medications || [],
+          preferred_language: userData.preferred_language || 'en',
+          avatar_url: userData.avatar_url || '',
+          bio: profileData?.bio || ''
         });
       }
     } catch (error) {
@@ -132,9 +112,30 @@ export const EditProfileForm: React.FC<EditProfileFormProps> = ({ userProfile: p
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
-  const handleInputChange = (field: keyof UserProfile, value: any) => {
+  useEffect(() => {
+    if (propUserProfile) {
+      // Use prop data if available
+      setProfile({
+        full_name: propUserProfile.full_name || '',
+        age: propUserProfile.age || undefined,
+        location: propUserProfile.location || '',
+        phone: propUserProfile.phone || '',
+        emergency_contact: propUserProfile.emergency_contact || '',
+        medical_conditions: propUserProfile.medical_conditions || [],
+        current_medications: propUserProfile.current_medications || [],
+        preferred_language: propUserProfile.preferred_language || 'en',
+        avatar_url: propUserProfile.avatar_url || '',
+        bio: propUserProfile.bio || ''
+      });
+      setLoading(false);
+    } else if (user) {
+      fetchProfile();
+    }
+  }, [user, propUserProfile, fetchProfile]);
+
+  const handleInputChange = <K extends keyof UserProfile>(field: K, value: UserProfile[K]) => {
     setProfile(prev => ({ ...prev, [field]: value }));
     if (errors[field]) {
       setErrors(prev => ({ ...prev, [field]: '' }));
@@ -176,81 +177,59 @@ export const EditProfileForm: React.FC<EditProfileFormProps> = ({ userProfile: p
     try {
       setSaving(true);
       
-      // Update users table
+      // Update users table. The avatar is managed by the avatar uploader
+      // (user_profiles.avatar_url), so it is not written from this form.
       const updateData = {
         full_name: profile.full_name,
-        age: profile.age,
+        age: profile.age ?? null,
         location: profile.location,
         phone: profile.phone,
         emergency_contact: profile.emergency_contact,
         medical_conditions: profile.medical_conditions,
         current_medications: profile.current_medications,
         preferred_language: profile.preferred_language,
-        avatar_url: profile.avatar_url,
         updated_at: new Date().toISOString()
       };
 
-      const { error: usersError } = await (supabase as any)
+      const { data: updatedUsers, error: usersError } = await supabase
         .from('users')
         .update(updateData)
-        .eq('id', user.id);
+        .eq('id', user.id)
+        .select('id');
 
       if (usersError) throw usersError;
-
-      // Update or create user_profiles table
-      const profileData = {
-        bio: profile.bio,
-        location: profile.location,
-        avatar_url: profile.avatar_url,
-        updated_at: new Date().toISOString()
-      };
-
-      // First try to update existing record
-      const { error: updateError } = await (supabase as any)
-        .from('user_profiles')
-        .update(profileData)
-        .eq('user_id', user.id);
-
-      // If no record exists (PGRST116 = no rows found), create one
-      if (updateError && updateError.code === 'PGRST116') {
-        console.log('No existing user_profiles record found, creating new one...');
-        const { error: insertError } = await (supabase as any)
-          .from('user_profiles')
-          .insert({
-            user_id: user.id,
-            ...profileData
-          });
-        
-        if (insertError) {
-          console.error('Error creating user_profiles record:', insertError);
-          throw insertError;
-        }
-        console.log('Successfully created user_profiles record');
-      } else if (updateError) {
-        console.error('Error updating user_profiles record:', updateError);
-        throw updateError;
-      } else {
-        console.log('Successfully updated user_profiles record');
+      if (!updatedUsers || updatedUsers.length === 0) {
+        throw new Error('Your account record was not found. Please sign out and sign in again.');
       }
+
+      // Create the user_profiles row if it does not exist yet, otherwise update it
+      const { error: profileError } = await supabase
+        .from('user_profiles')
+        .upsert(
+          {
+            user_id: user.id,
+            bio: profile.bio,
+            location: profile.location,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: 'user_id' }
+        );
+
+      if (profileError) throw profileError;
 
       toast.success('Profile updated successfully!');
-      
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('preferredLanguageUpdated', {
-          detail: { language: profile.preferred_language }
-        }));
-      }
-      
-      // Create notification for profile update
-      if ((window as any).createNotification) {
-        (window as any).createNotification(
-          'Profile Updated',
-          'Your profile information has been updated successfully',
-          'profile',
-          '/profile?tab=edit'
-        );
-      }
-      
+
+      window.dispatchEvent(new CustomEvent('preferredLanguageUpdated', {
+        detail: { language: profile.preferred_language }
+      }));
+
+      createNotification(
+        'Profile Updated',
+        'Your profile information has been updated successfully',
+        'profile',
+        '/profile?tab=edit'
+      );
+
       if (onProfileUpdate) {
         onProfileUpdate();
       }

@@ -11,12 +11,13 @@ import {
   CheckCircle,
   AlertCircle
 } from 'lucide-react';
-import { uploadAvatar, updateProfileAvatar, getAvatarUrl } from '@/lib/storage';
+import { uploadAvatar, getAvatarUrl } from '@/lib/storage';
+import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface AvatarUploadProps {
-  currentAvatar?: string;
+  currentAvatar?: string | null;
   onAvatarUpdate?: (avatarUrl: string) => void;
   size?: 'sm' | 'md' | 'lg';
   showUploadButton?: boolean;
@@ -100,17 +101,26 @@ export const AvatarUpload: React.FC<AvatarUploadProps> = ({
         return;
       }
 
-      // Update user profile
-      const updateResult = await updateProfileAvatar(user.id, uploadResult.url);
-      
-      if (!updateResult.success) {
-        setError(updateResult.error || 'Failed to update profile');
-        toast.error(updateResult.error || 'Failed to update profile');
+      // Save the public URL on the profile row (creates the row if it is missing)
+      const { error: profileError } = await supabase
+        .from('user_profiles')
+        .upsert(
+          { user_id: user.id, avatar_url: uploadResult.url, updated_at: new Date().toISOString() },
+          { onConflict: 'user_id' }
+        );
+
+      if (profileError) {
+        console.error('Profile avatar update error:', profileError);
+        setError('Failed to update profile');
+        toast.error('Failed to update profile');
         return;
       }
 
       // Success
       setPreviewUrl(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
       toast.success('Avatar updated successfully!');
       onAvatarUpdate?.(uploadResult.url);
       

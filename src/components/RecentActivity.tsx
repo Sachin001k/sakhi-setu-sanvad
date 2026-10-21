@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Video, MessageCircle, User, FileText, Heart, Share2, Activity } from 'lucide-react';
@@ -8,15 +8,16 @@ import { toast } from 'sonner';
 
 interface Activity {
   id: string;
-  type: 'video' | 'message' | 'profile' | 'post';
+  type: 'video' | 'message' | 'profile' | 'post' | 'wellness';
   title: string;
   description: string;
   created_at: string;
-  metadata?: any;
+  metadata?: Record<string, string>;
 }
 
 interface RecentActivityProps {
-  profile?: any;
+  // Only used to refetch when the profile changes.
+  profile?: unknown;
 }
 
 const RecentActivity: React.FC<RecentActivityProps> = ({ profile }) => {
@@ -24,14 +25,10 @@ const RecentActivity: React.FC<RecentActivityProps> = ({ profile }) => {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (user) {
-      fetchActivities();
-    }
-  }, [user, profile]);
+  const userId = user?.id;
 
-  const fetchActivities = async () => {
-    if (!user) return;
+  const fetchActivities = useCallback(async () => {
+    if (!userId) return;
 
     try {
       setLoading(true);
@@ -41,7 +38,7 @@ const RecentActivity: React.FC<RecentActivityProps> = ({ profile }) => {
       const { data: videos, error: videoError } = await supabase
         .from('video_library')
         .select('id, title, created_at')
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .order('created_at', { ascending: false })
         .limit(5);
 
@@ -62,7 +59,7 @@ const RecentActivity: React.FC<RecentActivityProps> = ({ profile }) => {
       const { data: posts, error: postError } = await supabase
         .from('community_posts')
         .select('id, content, created_at')
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .order('created_at', { ascending: false })
         .limit(5);
 
@@ -83,8 +80,8 @@ const RecentActivity: React.FC<RecentActivityProps> = ({ profile }) => {
       const { data: profileData, error: profileError } = await supabase
         .from('user_profiles')
         .select('updated_at')
-        .eq('user_id', user.id)
-        .single();
+        .eq('user_id', userId)
+        .maybeSingle();
 
       if (!profileError && profileData?.updated_at) {
         allActivities.push({
@@ -101,7 +98,7 @@ const RecentActivity: React.FC<RecentActivityProps> = ({ profile }) => {
       const { data: symptoms, error: symptomsError } = await supabase
         .from('symptoms')
         .select('id, symptom_type, severity, recorded_at')
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .order('recorded_at', { ascending: false })
         .limit(5);
 
@@ -130,7 +127,11 @@ const RecentActivity: React.FC<RecentActivityProps> = ({ profile }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [userId]);
+
+  useEffect(() => {
+    fetchActivities();
+  }, [fetchActivities, profile]);
 
 
   const getActivityIcon = (type: string) => {

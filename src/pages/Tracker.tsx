@@ -1,49 +1,15 @@
 import { motion } from "framer-motion";
-import { useState } from "react";
-import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
 import Navigation from "@/components/Navigation";
 import { SymptomTracker } from "@/components/SymptomTracker";
 import { AIAnalytics } from "@/components/AIAnalytics";
 import Reminders from "@/components/Reminders";
-import { Activity, Moon, Smile, Droplets, ArrowLeft, CheckCircle2, Brain, Clock } from "lucide-react";
+import { Activity, ArrowLeft, Brain, Clock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const Tracker = () => {
   const navigate = useNavigate();
-  const [sleep, setSleep] = useState([7]);
-  const [mood, setMood] = useState([5]);
-  const [hotFlashes, setHotFlashes] = useState([0]);
-  const [notes, setNotes] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
-
-  const symptoms = [
-    { icon: Moon, label: "Sleep (hours)", value: sleep, setter: setSleep, max: 12, color: "primary" },
-    { icon: Smile, label: "Mood", value: mood, setter: setMood, max: 10, color: "energy" },
-    { icon: Droplets, label: "Hot Flashes", value: hotFlashes, setter: setHotFlashes, max: 10, color: "secondary" },
-  ];
-
-  const handleSave = async () => {
-    setIsSaving(true);
-    
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    toast.success("Symptoms logged successfully!", {
-      description: "Your data has been saved and AI is analyzing patterns.",
-      icon: <CheckCircle2 className="w-5 h-5" />,
-    });
-    
-    setIsSaving(false);
-    
-    // Navigate back after a short delay
-    setTimeout(() => navigate("/"), 1500);
-  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 pb-24">
